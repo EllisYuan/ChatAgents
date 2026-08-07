@@ -6,7 +6,7 @@ Repo-level conventions for AI coding agents working in this repository.
 
 ### Issue tracker
 
-Issues live as GitHub issues in `EllisYuan/Yuan-s-Chat-Agents`, managed with the `gh` CLI. See `docs/agents/issue-tracker.md`.
+Issues live as GitHub issues in `EllisYuan/ChatAgents`, managed with the `gh` CLI. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
