@@ -22,6 +22,14 @@
 
 ---
 
+## ⚠️ 内部矛盾勘误（#9 决策会话于 2026-08-08 发现并修正）
+
+原 5.1 节把 `estimated_cost_usd` 列进了 App DB 的存储内容，与本报告结论评论及 6.1 节「观测事实与配置推算隔离」直接矛盾——成本是推算，落库即固化，中转站调价或用户自带 key 会让存下的数字永久错下去。
+
+**已删除 5.1 节中的 `estimated_cost_usd`。** 物理层只存原始 token 数与模型名，成本一律在查询/导出层实时推算。#9 已按此裁定数据模型。
+
+---
+
 ## 1. 结论摘要 (Executive Summary)
 
 ### 1.1 核心选型结论
@@ -129,7 +137,7 @@
 
 1. **主存储 (App DB)**：
    * **定位**：React 前端呈现消息列表、内嵌 Token 统计卡片、单条消息 Span 概览的核心数据源。
-   * **内容**：存储 `trace_id`、`message_id`、`prompt_tokens`、`completion_tokens`、`usage_status` (`COMPLETE`/`PARTIAL`/`UNAVAILABLE`)、`estimated_cost_usd` 及简化的 Spans 树。
+   * **内容**：存储 `trace_id`、`message_id`、`prompt_tokens`、`completion_tokens`、`usage_status` (`COMPLETE`/`PARTIAL`/`UNAVAILABLE`) 及简化的 Spans 树。**不存成本**——成本是推算而非观测事实，一律在查询/导出层按价格矩阵实时算（见 6.1 节）。
    * **写入方式**：FastAPI 请求结束或流中断时，由 Backend 依赖事务/文件锁同步写入。
 
 2. **辅助可观测引擎 (Arize Phoenix 或 Langfuse)**：
