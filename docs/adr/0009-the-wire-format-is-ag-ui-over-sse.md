@@ -47,3 +47,5 @@ AG-UI 的事件表里**没有用量、成本、跨度的位置**——那恰好�
 **三个包钉精确版本，Renovate 单开一组、不自动合并。** 0.0.x 下 semver 不保证任何东西。前后端同版本号同发布，所以破坏性变更不需要兼容窗口，只需要一次同步升，由契约测试把门。
 
 **33 个事件类型只发 15 种。** `THINKING_*`（被 `REASONING_*` 取代）、三个 `*_CHUNK`（那是给不知道消息边界的生产者的便利形态）、`STATE_*`（Agent 状态快照只写不读）、`MESSAGES_SNAPSHOT`（历史走 REST）、`ACTIVITY_*` / `RAW` 一律不发。`REASONING_*` 语义位留着但本期不发——原生 reasoning 的采集还没有票覆盖，现在发等于先定一个没人产出的格式。
+
+> **已由 [ADR-0017](./0017-native-reasoning-is-two-things.md) 修订。** 原生推理的采集已有决定，七个 `REASONING_*` 里发五个（不发 `REASONING_MESSAGE_CHUNK` 与 `REASONING_ENCRYPTED_VALUE`），**只发的总数从 15 种改为 20 种**。本节其余结论不变。
