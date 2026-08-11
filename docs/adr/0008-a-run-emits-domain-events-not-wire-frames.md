@@ -7,7 +7,7 @@
 ```python
 class AgentRunner:
     async def run(self, messages: list[ModelMessage],
-                  main: EndpointProfile, tool: EndpointProfile
+                  main: EndpointProfile, auxiliary: EndpointProfile
                   ) -> AsyncIterator[RunEvent]: ...
 ```
 
@@ -17,7 +17,7 @@ class AgentRunner:
 encode_sse(              # 传输层：领域事件 → 线格式
     observe(             # observability/：落跨度，独立事务，失败只记日志
         persist(         # conversation/：落消息，业务事务，失败要报错
-            runner.run(messages, main_profile, tool_profile))))
+            runner.run(messages, main_profile, auxiliary_profile))))
 ```
 
 ## 为什么 Loop 不能直接产 SSE
@@ -70,4 +70,4 @@ encode_sse(              # 传输层：领域事件 → 线格式
 
 **错误按"流是否已开始"分成两类。** 流式响应发出第一个字节后 HTTP 状态码就定死是 200，之后再出错也改不了。因此：流开始前的失败（档案校验、模型标识校验、会话存在性）走正常 HTTP 状态码；流开始后的失败走 `RunFailed` 事件。由此得到一条纪律——**所有能提前做的校验必须在返回流式响应之前做完**，因为流里的失败前端处理起来麻烦得多，且 200 的响应在监控上看着是成功的。
 
-**[模型角色](../../CONTEXT.md)的两个档案都必须解析出结果。** [ADR-0005](./0005-long-documents-use-progressive-disclosure.md) 废除二级摘要后，`tool` 角色当前没有调用者，但它仍是配置契约的一等公民：服务端预设与用户自定义两层都必须能指定，解析结果不为空，零配置下跟随主模型。配一条测试断言这一点，否则一条没有调用者的路径迟早悄悄坏掉。
+**[模型角色](../../CONTEXT.md)的两个档案都必须解析出结果。** [ADR-0005](./0005-long-documents-use-progressive-disclosure.md) 废除二级摘要后，辅助角色一度没有调用者，但它仍是配置契约的一等公民：服务端预设与用户自定义两层都必须能指定，解析结果不为空，零配置下跟随主模型。配一条测试断言这一点，否则一条没有调用者的路径迟早悄悄坏掉。（该角色后经 [ADR-0012](./0012-the-auxiliary-model-never-writes-to-the-message-table.md) 定名 `auxiliary`，并获得第一个调用者：会话标题生成。这条断言因此从守一条空路径变成守标题生成的必经之路。）
