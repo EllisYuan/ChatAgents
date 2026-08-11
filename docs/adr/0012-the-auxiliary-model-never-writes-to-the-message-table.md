@@ -51,6 +51,6 @@ LibreChat 走的是另一条路：不设通用角色，按用途分字段（`tit
 ## 后果
 
 - `obs.span` 的物化真列 `role` 取值为 `main` / `auxiliary`；用量按角色分别归属。
-- [ADR-0008](./0008-a-run-emits-domain-events-not-wire-frames.md) 末尾那条断言改为断言 `auxiliary` 档案非空且零配置下等于 `main`——它现在守的不再是一条空路径，而是标题生成的必经之路。
-- 配置键 `auxiliaryModel`，YAML 端点文件与前端高级选项同名。
+- [ADR-0008](./0008-a-run-emits-domain-events-not-wire-frames.md) 末尾那条断言改为断言 `auxiliary` 解析出的模型标识非空且零配置下等于 `main`——它现在守的不再是一条空路径，而是标题生成的必经之路。
+- 配置键 `auxiliaryModel`，YAML 端点文件与前端高级选项同名。**它只是一个模型标识，不是一份独立的端点档案**——两个角色共用同一个协议、base URL 与鉴权（见 [ADR-0014](./0014-the-model-is-chosen-by-the-user-never-by-the-system.md)）。
 - 零配置下 `auxiliary` 跟随主模型，意味着一个 30 字的标题可能由 reasoning 模型生成，账单不小。**这个成本不隐藏**——它在 trace 里按角色单独列账。隐形辅助调用吃掉的钱是 LLM 应用里真实存在的黑洞，本项目的立场是把它照出来，而不是藏起来或替用户做主关掉它。
