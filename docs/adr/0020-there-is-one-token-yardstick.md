@@ -1,6 +1,6 @@
 # token 只有一个口径：上游计费口径
 
-[ADR-0004](./0004-tools-are-capabilities-providers-are-implementations.md) 把工具层切成三段，其中编排层是一个纯函数，职责是「规范化、切章节、**计数**、渲染」；[ADR-0005](./0005-long-documents-use-progressive-disclosure.md) 的分节阈值单位是 **token**。两者合起来要求项目里存在一个 token 计数器，但**没有一份决策说过它是什么**。[ADR-0017](./0017-old-observations-are-masked-not-summarized.md) 的保留窗口预算是第二个需要它的地方。补上这个洞。
+[ADR-0004](./0004-tools-are-capabilities-providers-are-implementations.md) 把工具层切成三段，其中编排层是一个纯函数，职责是「规范化、切章节、**计数**、渲染」；[ADR-0005](./0005-long-documents-use-progressive-disclosure.md) 的分节阈值单位是 **token**。两者合起来要求项目里存在一个 token 计数器，但**没有一份决策说过它是什么**。[ADR-0019](./0019-old-observations-are-masked-not-summarized.md) 的保留窗口预算是第二个需要它的地方。补上这个洞。
 
 **决定：全项目只有一个 token 口径——上游响应报告的输入 token 数（[用量](../../CONTEXT.md)三态中的 `COMPLETE`）。本地估算器的职责不是「数 token」，是「预测上游会数出多少」。**
 
@@ -14,7 +14,7 @@
 
 **同一家的不同代次差约三成。** 同一段文本在 Claude 4.7 前后的计数差异约 30%。不存在「Claude 的 tokenizer」，只有「某一代的 tokenizer」——而 [ADR-0016](./0016-the-model-list-is-discovered-and-persisted.md) 定了模型清单运行时发现、用户可填任意标识，我们连它属于哪一代都不知道。
 
-**计数端点只有一个协议有。** `anthropic_messages` 有，两个 OpenAI 协议都没有对应端点。用它就是又一次三协议不对齐，撞 ADR-0017 已定的判据；走中转站是否可用亦未验证。业界那些「对 Claude 也准」的多模型计数库，内部正是**调这个网络端点**——它们没有解决问题，只是转发了问题。
+**计数端点只有一个协议有。** `anthropic_messages` 有，两个 OpenAI 协议都没有对应端点。用它就是又一次三协议不对齐，撞 ADR-0019 已定的判据；走中转站是否可用亦未验证。业界那些「对 Claude 也准」的多模型计数库，内部正是**调这个网络端点**——它们没有解决问题，只是转发了问题。
 
 ## 为什么真值比任何 tokenizer 都好
 
@@ -45,4 +45,4 @@
 
 **系统提示词不需要单独记账。** 上游数的是整个请求，真值天然包含它。[ADR-0010](./0010-the-system-prompt-is-run-configuration-not-conversation-memory.md) 定了重建序列不含系统提示词、由服务层另行注入，那笔账在真值路径上根本不存在；仅在退化为全量估算时才需显式加上它的估算值。
 
-**预算是滞后一轮的。** 这不是缺陷而是分工：常态层要的是体积控制，不是超窗的精确防守——后者归 ADR-0017 的第二层，由上游错误驱动，因为唯一准确的超窗信号就是那个错误本身。**任何 token 数都不触发丢弃。**
+**预算是滞后一轮的。** 这不是缺陷而是分工：常态层要的是体积控制，不是超窗的精确防守——后者归 ADR-0019 的第二层，由上游错误驱动，因为唯一准确的超窗信号就是那个错误本身。**任何 token 数都不触发丢弃。**
