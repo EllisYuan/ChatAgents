@@ -227,8 +227,6 @@ intelligent-chatbot/
 │   ├── prompts.py             # Prompt templates
 │   ├── session_manager.py     # Session manager
 │   └── utils.py               # Utility functions
-├── data/                       # Data directory
-│   └── sessions/              # Session data storage
 ├── docs/                       # Documentation directory
 │   └── TAVILY_PARAMETERS.md   # Tavily parameters documentation
 ├── .streamlit/                 # Streamlit configuration
@@ -240,11 +238,10 @@ intelligent-chatbot/
 ├── .gitignore                  # Git ignore file
 ├── Dockerfile                  # Docker image
 ├── docker-compose.yml          # Docker Compose configuration
-├── favicon.ico                 # Website icon
+├── frontend/                   # Frontend assets
+│   └── public/favicon.ico      # Website icon
 ├── setup.bat                   # Windows setup script
 ├── start.bat                   # Windows startup script
-├── PROJECT_SUMMARY.md          # Project summary
-├── QUICK_START.md              # Quick start guide
 ├── README.md                   # Project documentation (Chinese)
 └── README_EN.md                # Project documentation (English)
 ```

@@ -280,8 +280,6 @@ intelligent-chatbot/
 │   ├── prompts.py             # 提示词模板
 │   ├── session_manager.py     # 会话管理器
 │   └── utils.py               # 工具函数
-├── data/                       # 数据目录
-│   └── sessions/              # 会话数据存储
 ├── docs/                       # 文档目录
 │   └── TAVILY_PARAMETERS.md   # Tavily 参数说明
 ├── .streamlit/                 # Streamlit 配置
@@ -293,9 +291,8 @@ intelligent-chatbot/
 ├── .gitignore                  # Git 忽略文件
 ├── Dockerfile                  # Docker 镜像
 ├── docker-compose.yml          # Docker Compose 配置
-├── favicon.ico                 # 网站图标
-├── PROJECT_SUMMARY.md          # 项目概述
-├── QUICK_START.md              # 快速开始指南
+├── frontend/                   # 前端资源
+│   └── public/favicon.ico      # 网站图标
 ├── README.md                   # 项目文档（中文）
 └── README_EN.md                # 项目文档（英文）
 ```

@@ -44,7 +44,7 @@ load_dotenv()
 # ==================== 页面配置 ====================
 st.set_page_config(
     page_title="Yuan's Chat Agents",
-    page_icon="./favicon.ico",
+    page_icon="./frontend/public/favicon.ico",
     layout="wide",
     initial_sidebar_state="expanded"
 )
