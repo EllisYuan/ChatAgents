@@ -6,6 +6,7 @@ import os
 from typing import Any
 
 from alembic import context
+from chat_agents import db  # noqa: F401  (registers app/obs models onto Base.metadata)
 from chat_agents.database import MANAGED_SCHEMAS, Base
 from sqlalchemy import engine_from_config, pool
 from sqlalchemy.engine import Connection

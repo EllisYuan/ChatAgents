@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.exc import OperationalError
@@ -75,8 +76,104 @@ def test_upgrade_head_creates_application_and_observability_schemas() -> None:
                 text("SELECT version_num FROM public.alembic_version")
             ).scalar_one()
 
+            app_tables = set(
+                connection.execute(
+                    text(
+                        "SELECT table_name FROM information_schema.tables "
+                        "WHERE table_schema = 'app'"
+                    )
+                ).scalars()
+            )
+            obs_tables = set(
+                connection.execute(
+                    text(
+                        "SELECT table_name FROM information_schema.tables "
+                        "WHERE table_schema = 'obs'"
+                    )
+                ).scalars()
+            )
+            message_columns = set(
+                connection.execute(
+                    text(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_schema = 'app' AND table_name = 'message'"
+                    )
+                ).scalars()
+            )
+            span_columns = set(
+                connection.execute(
+                    text(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_schema = 'obs' AND table_name = 'span'"
+                    )
+                ).scalars()
+            )
+            session_columns = set(
+                connection.execute(
+                    text(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_schema = 'app' AND table_name = 'session'"
+                    )
+                ).scalars()
+            )
+            all_columns = connection.execute(
+                text(
+                    "SELECT table_schema, table_name, column_name "
+                    "FROM information_schema.columns "
+                    "WHERE table_schema IN ('app', 'obs')"
+                )
+            ).all()
+            fk_directions = connection.execute(
+                text(
+                    """
+                    SELECT tc.table_schema AS fk_schema, ccu.table_schema AS ref_schema
+                    FROM information_schema.table_constraints tc
+                    JOIN information_schema.constraint_column_usage ccu
+                        ON tc.constraint_name = ccu.constraint_name
+                        AND tc.table_schema = ccu.table_schema
+                    WHERE tc.constraint_type = 'FOREIGN KEY'
+                        AND tc.table_schema IN ('app', 'obs')
+                    """
+                )
+            ).all()
+
+        script = ScriptDirectory.from_config(config)
+
         assert schemas == {"app", "obs"}
-        assert revision == "0001_schemas"
+        assert revision == script.get_current_head()
+
+        assert app_tables == {
+            "session",
+            "message",
+            "prompt_versions",
+            "tool_schema_versions",
+            "discovered_model",
+        }
+        assert obs_tables == {"run", "span"}
+
+        assert "run_id" not in message_columns
+
+        assert {
+            "role",
+            "model",
+            "input_tokens",
+            "output_tokens",
+            "usage_status",
+            "reasoning_tokens",
+        } <= span_columns
+
+        assert "pruned_run_count" in session_columns
+
+        cost_like = {
+            (schema_name, table_name, column_name)
+            for schema_name, table_name, column_name in all_columns
+            if "cost" in column_name.lower()
+        }
+        assert cost_like == set()
+
+        for fk_schema, ref_schema in fk_directions:
+            assert fk_schema == "obs" or ref_schema == "app"
+            assert not (fk_schema == "app" and ref_schema == "obs")
     finally:
         engine.dispose()
         _drop_database(admin_url, database_name)
