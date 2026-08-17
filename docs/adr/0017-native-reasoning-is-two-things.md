@@ -67,4 +67,4 @@ AG-UI 的七个 `REASONING_*` 里发五个：`REASONING_START` / `REASONING_MESS
 
 **`display` 与 `reasoning.summary` 不进 [ADR-0011](./0011-model-input-configuration-is-versioned-and-persisted.md) 的版本化体系。** 它们只改变返回形态、不改变模型输入——官方明说 `signature` 在两种 `display` 下完全相同——因此不影响评测基线。
 
-**中转站透不透传未经实测。** 本 ADR 的结论全部由三家协议的公开规范推出，不依赖任何一台中转站；实际部署上能否看到推理是一条待验证事实，而「看不到」的降级语义已在上面定死，验不验都不改变代码形态。
+**中转站透不透传已实测（[#38](https://github.com/EllisYuan/ChatAgents/issues/38)，2026-08-16/17，实测对象 `api.ellisyuan.com`）。** 本 ADR 的结论全部由三家协议的公开规范推出，不依赖任何一台中转站；实测结果是**不透明往返载荷（`signature`、`encrypted_content`）原样透传，显示摘要文本（`thinking` 正文、`reasoning.summary`）一律被清空**，`thinking_tokens`/`reasoning_tokens` 仍如实返回，证明推理确有发生、只是摘要文本没被这台中转站带出来。这正落在上面定死的「中转站没透传」一种静默降级里，验证结果不改变代码形态；实测详情见 `.scratch/relay-ellisyuan-verification.md`。
