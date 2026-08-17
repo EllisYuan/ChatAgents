@@ -5,12 +5,12 @@
 """
 
 import json
-import os
+import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
-from filelock import FileLock, Timeout
-import logging
+from typing import Any, cast
+
+from filelock import FileLock
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ class SessionManager:
         """初始化会话管理器"""
         self.lock = FileLock(str(LOCK_FILE), timeout=10)
 
-    def _ensure_index_exists(self):
+    def _ensure_index_exists(self) -> None:
         """确保索引文件存在"""
         if not INDEX_FILE.exists():
             with self.lock:
@@ -38,12 +38,12 @@ class SessionManager:
                 if not INDEX_FILE.exists():
                     self._write_json(INDEX_FILE, {"sessions": []})
 
-    def _read_json(self, file_path: Path) -> Dict:
+    def _read_json(self, file_path: Path) -> dict:
         """安全读取 JSON 文件"""
         try:
             if file_path.exists():
-                with open(file_path, "r", encoding="utf-8") as f:
-                    return json.load(f)
+                with open(file_path, encoding="utf-8") as f:
+                    return cast(dict[str, Any], json.load(f))
             return {}
         except json.JSONDecodeError as e:
             logger.error(f"JSON 解析错误: {file_path}, {e}")
@@ -52,7 +52,7 @@ class SessionManager:
             logger.error(f"读取文件失败: {file_path}, {e}")
             return {}
 
-    def _write_json(self, file_path: Path, data: Dict):
+    def _write_json(self, file_path: Path, data: dict[str, Any]) -> None:
         """安全写入 JSON 文件（带备份）"""
         backup_path = file_path.with_suffix(".json.bak")
 
@@ -60,6 +60,7 @@ class SessionManager:
             # 如果原文件存在，先备份
             if file_path.exists():
                 import shutil
+
                 shutil.copy(file_path, backup_path)
 
             # 写入新数据
@@ -75,10 +76,11 @@ class SessionManager:
             # 如果写入失败且有备份，尝试恢复
             if backup_path.exists() and not file_path.exists():
                 import shutil
+
                 shutil.copy(backup_path, file_path)
             raise
 
-    def get_sessions_list(self) -> List[Dict]:
+    def get_sessions_list(self) -> list[dict[str, Any]]:
         """
         获取会话列表（仅元数据）
 
@@ -89,13 +91,13 @@ class SessionManager:
 
         with self.lock:
             data = self._read_json(INDEX_FILE)
-            sessions = data.get("sessions", [])
+            sessions = cast(list[dict[str, Any]], data.get("sessions", []))
 
             # 按更新时间倒序排列
             sessions.sort(key=lambda x: x.get("updated_at", ""), reverse=True)
             return sessions
 
-    def get_session(self, session_id: str) -> Optional[Dict]:
+    def get_session(self, session_id: str) -> dict | None:
         """
         获取会话详情
 
@@ -114,7 +116,7 @@ class SessionManager:
         with self.lock:
             return self._read_json(session_file)
 
-    def create_session(self, session_id: str, title: Optional[str] = None) -> Dict:
+    def create_session(self, session_id: str, title: str | None = None) -> dict:
         """
         创建新会话
 
@@ -133,7 +135,7 @@ class SessionManager:
             "title": title or session_id,  # 默认使用 session_id 作为标题
             "created_at": now,
             "updated_at": now,
-            "messages": []
+            "messages": [],
         }
 
         with self.lock:
@@ -143,19 +145,21 @@ class SessionManager:
 
             # 更新索引
             index_data = self._read_json(INDEX_FILE)
-            index_data["sessions"].append({
-                "session_id": session_id,
-                "title": session_data["title"],
-                "created_at": session_data["created_at"],
-                "updated_at": session_data["updated_at"],
-                "message_count": 0
-            })
+            index_data["sessions"].append(
+                {
+                    "session_id": session_id,
+                    "title": session_data["title"],
+                    "created_at": session_data["created_at"],
+                    "updated_at": session_data["updated_at"],
+                    "message_count": 0,
+                }
+            )
             self._write_json(INDEX_FILE, index_data)
 
         logger.info(f"创建会话: {session_id}, 标题: {title}")
         return session_data
 
-    def save_session(self, session_data: Dict):
+    def save_session(self, session_data: dict[str, Any]) -> None:
         """
         保存会话数据
 
@@ -192,13 +196,15 @@ class SessionManager:
 
             # 如果索引中不存在，添加新条目
             if not found:
-                sessions.append({
-                    "session_id": session_id,
-                    "title": session_data.get("title", "新对话"),
-                    "created_at": session_data.get("created_at", now),
-                    "updated_at": now,
-                    "message_count": len(session_data.get("messages", []))
-                })
+                sessions.append(
+                    {
+                        "session_id": session_id,
+                        "title": session_data.get("title", "新对话"),
+                        "created_at": session_data.get("created_at", now),
+                        "updated_at": now,
+                        "message_count": len(session_data.get("messages", [])),
+                    }
+                )
 
             index_data["sessions"] = sessions
             self._write_json(INDEX_FILE, index_data)
@@ -296,6 +302,7 @@ class SessionManager:
 
 # 全局单例
 _session_manager = None
+
 
 def get_session_manager() -> SessionManager:
     """获取会话管理器单例"""

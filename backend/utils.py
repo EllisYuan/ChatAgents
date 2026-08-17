@@ -21,9 +21,7 @@ def check_api_key(api_key: str) -> bool:
     try:
         payload = {"api_key": api_key, "use_case": "chat"}
 
-        response = requests.post(
-            f"{TAVILY_API_ENDPOINT}/authorize-use-case", json=payload
-        )
+        response = requests.post(f"{TAVILY_API_ENDPOINT}/authorize-use-case", json=payload)
 
         response.raise_for_status()
 

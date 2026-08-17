@@ -1,11 +1,13 @@
+import ast
+import json
 import logging
-from typing import Callable, Any
+from collections.abc import Callable
+from typing import Any
+
 from langchain_core.language_models import BaseChatModel
 from langchain_tavily import TavilyCrawl, TavilyExtract, TavilySearch
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.prebuilt import create_react_agent
-import json
-import ast
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -22,6 +24,7 @@ def create_output_summarizer(summary_llm: BaseChatModel) -> Callable[[str, str],
     Returns:
         摘要函数
     """
+
     def summarize_output(tool_output: str, user_message: str = "") -> dict:
         """
         对工具输出进行摘要处理
@@ -50,8 +53,8 @@ def create_output_summarizer(summary_llm: BaseChatModel) -> Callable[[str, str],
         favicons = []
         content = ""
 
-        if isinstance(parsed_output, dict) and 'results' in parsed_output:
-            items = parsed_output['results']
+        if isinstance(parsed_output, dict) and "results" in parsed_output:
+            items = parsed_output["results"]
         elif isinstance(parsed_output, list):
             items = parsed_output
         else:
@@ -60,12 +63,12 @@ def create_output_summarizer(summary_llm: BaseChatModel) -> Callable[[str, str],
         # 从结果中提取信息
         for item in items:
             if isinstance(item, dict):
-                if 'url' in item:
-                    urls.append(item['url'])
-                if 'favicon' in item:
-                    favicons.append(item['favicon'])
-                if 'raw_content' in item:
-                    content += item['raw_content'] + "\n\n"
+                if "url" in item:
+                    urls.append(item["url"])
+                if "favicon" in item:
+                    favicons.append(item["favicon"])
+                if "raw_content" in item:
+                    content += item["raw_content"] + "\n\n"
 
         # 生成摘要
         if content:
@@ -96,7 +99,7 @@ class WebAgent:
     Web智能体 类，集成 Tavily 搜索、提取和爬取功能
     """
 
-    def __init__(self, checkpointer: MemorySaver = None):
+    def __init__(self, checkpointer: MemorySaver | None = None) -> None:
         """
         初始化 Web 智能体
 
@@ -114,8 +117,8 @@ class WebAgent:
         user_message: str = "",
         mode: str = "fast",
         topic: str = "general",
-        time_range: str = None
-    ):
+        time_range: str | None = None,
+    ) -> Any:
         """
         构建并编译 LangGraph 工作流
 
@@ -140,7 +143,7 @@ class WebAgent:
         # deep: 深度思考模式，使用 advanced 深度，5 条结果，包含图片，结果更全面但成本更高
         depth = "basic" if mode == "fast" else "advanced"
         max_results = 3 if mode == "fast" else 5
-        include_images = False if mode == "fast" else True
+        include_images = mode != "fast"
         crawl_limit = 5 if mode == "fast" else 15
 
         # 构建 TavilySearch 参数
@@ -168,11 +171,7 @@ class WebAgent:
             include_images=include_images,
         )
 
-        crawl = TavilyCrawl(
-            tavily_api_key=api_key,
-            include_favicon=True,
-            limit=crawl_limit
-        )
+        crawl = TavilyCrawl(tavily_api_key=api_key, include_favicon=True, limit=crawl_limit)
 
         # 创建输出摘要器
         output_summarizer = create_output_summarizer(summary_llm)
@@ -180,24 +179,24 @@ class WebAgent:
         # 为 Extract 工具添加摘要功能
         class SummarizingTavilyExtract(TavilyExtract):
             def _run(self, *args, **kwargs):
-                kwargs.pop('run_manager', None)
+                kwargs.pop("run_manager", None)
                 result = super()._run(*args, **kwargs)
                 return output_summarizer(str(result), user_message)
 
             async def _arun(self, *args, **kwargs):
-                kwargs.pop('run_manager', None)
+                kwargs.pop("run_manager", None)
                 result = await super()._arun(*args, **kwargs)
                 return output_summarizer(str(result), user_message)
 
         # 为 Crawl 工具添加摘要功能
         class SummarizingTavilyCrawl(TavilyCrawl):
             def _run(self, *args, **kwargs):
-                kwargs.pop('run_manager', None)
+                kwargs.pop("run_manager", None)
                 result = super()._run(*args, **kwargs)
                 return output_summarizer(str(result), user_message)
 
             async def _arun(self, *args, **kwargs):
-                kwargs.pop('run_manager', None)
+                kwargs.pop("run_manager", None)
                 result = await super()._arun(*args, **kwargs)
                 return output_summarizer(str(result), user_message)
 
@@ -206,14 +205,14 @@ class WebAgent:
             extract_depth=extract.extract_depth,
             tavily_api_key=api_key,
             include_favicon=extract.include_favicon,
-            description=extract.description
+            description=extract.description,
         )
 
         crawl_with_summary = SummarizingTavilyCrawl(
             tavily_api_key=api_key,
             include_favicon=crawl.include_favicon,
             limit=crawl.limit,
-            description=crawl.description
+            description=crawl.description,
         )
 
         # 创建 ReAct 智能体

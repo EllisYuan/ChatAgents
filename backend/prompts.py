@@ -6,7 +6,9 @@ def get_current_date() -> str:
     today_obj = datetime.datetime.today()
     today_cn = today_obj.strftime("%Y年%m月%d日")
     today_en = today_obj.strftime("%A, %B %d, %Y")
-    weekday_cn = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"][today_obj.weekday()]
+    weekday_cn = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"][
+        today_obj.weekday()
+    ]
     return f"{today_cn} {weekday_cn}（{today_en}）"
 
 

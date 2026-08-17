@@ -36,6 +36,43 @@ dependencies = [
 [dependency-groups]
 dev = [
     "mypy>=1.13.0",
+    "pre-commit>=4.6.2",
     "pytest>=8.3.0",
     "ruff>=0.9.0",
+    "types-requests>=2.33.0.20260712",
 ]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+exclude = [".venv", "dist", "__pycache__"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "ASYNC", "RUF"]
+# Fullwidth punctuation is intentional in Chinese strings and docstrings.
+ignore = ["E501", "RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.11"
+files = ["."]
+exclude = ["dist/", "\\.venv/"]
+plugins = ["pydantic.mypy"]
+# Third-party LLM packages may lack stubs or use newer stub syntax.
+follow_imports = "skip"
+ignore_missing_imports = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+check_untyped_defs = true
+disallow_incomplete_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true

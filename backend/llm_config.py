@@ -4,15 +4,17 @@ LLM 配置模块
 """
 
 import os
-from typing import Optional
-from langchain_core.language_models import BaseChatModel
+from typing import ClassVar
+
 from langchain_anthropic import ChatAnthropic
-from langchain_openai import ChatOpenAI
+from langchain_core.language_models import BaseChatModel
 from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
 
 
 class LLMProvider:
     """LLM 提供商枚举"""
+
     CLAUDE = "claude"
     OPENAI = "openai"
     GROQ = "groq"
@@ -25,14 +27,14 @@ class LLMConfig:
     """
 
     # 支持的 Claude 模型
-    CLAUDE_MODELS = {
+    CLAUDE_MODELS: ClassVar[dict[str, str]] = {
         "haiku": "claude-haiku-4-5-20251001",
         "sonnet": "claude-sonnet-4-5-20250929",
         "opus": "claude-opus-4-1-202508059",
     }
 
     # 支持的 OpenAI 模型
-    OPENAI_MODELS = {
+    OPENAI_MODELS: ClassVar[dict[str, str]] = {
         "gpt-5.1": "gpt-5.1",
         "gpt-5-mini": "gpt-5-mini",
         "gpt-5-nano": "gpt-5-nano",
@@ -41,16 +43,16 @@ class LLMConfig:
     }
 
     # 支持的 Groq 模型
-    # GROQ_MODELS = {
-    #     "llama-3.3-70b": "llama-3.3-70b-versatile",
-    #     "mixtral-8x7b": "mixtral-8x7b-32768",
-    #     "kimi-k2": "moonshotai/kimi-k2-instruct",
-    # }
+    GROQ_MODELS: ClassVar[dict[str, str]] = {
+        "llama-3.3-70b": "llama-3.3-70b-versatile",
+        "mixtral-8x7b": "mixtral-8x7b-32768",
+        "kimi-k2": "moonshotai/kimi-k2-instruct",
+    }
 
     @staticmethod
     def create_claude(
         model: str = "sonnet",
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         temperature: float = 0.7,
         max_tokens: int = 4096,
         streaming: bool = True,
@@ -86,7 +88,7 @@ class LLMConfig:
     @staticmethod
     def create_openai(
         model: str = "gpt-5.1-mini",
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         temperature: float = 1,
         max_tokens: int = 4096,
         streaming: bool = True,
@@ -122,7 +124,7 @@ class LLMConfig:
     @staticmethod
     def create_groq(
         model: str = "llama-3.3-70b",
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         temperature: float = 0.7,
         max_tokens: int = 4096,
         streaming: bool = True,
@@ -158,8 +160,8 @@ class LLMConfig:
     @staticmethod
     def create_llm(
         provider: str = LLMProvider.CLAUDE,
-        model: Optional[str] = None,
-        api_key: Optional[str] = None,
+        model: str | None = None,
+        api_key: str | None = None,
         max_tokens: int = 4096,
         streaming: bool = True,
     ) -> BaseChatModel:
