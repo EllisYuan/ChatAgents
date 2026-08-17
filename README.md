@@ -557,6 +557,15 @@ docker stats chatbot-backend chatbot-frontend
 
 欢迎贡献！请随时提交 Issue 或 Pull Request。
 
+### 提交前本地自检
+
+```bash ci-command
+uv sync --project backend --locked
+uv run --project backend ruff check --config=backend/pyproject.toml backend
+uv run --project backend ruff format --check --config=backend/pyproject.toml backend
+uv run --project backend mypy --config-file=backend/pyproject.toml backend
+```
+
 ### 贡献流程
 
 1. Fork 本仓库

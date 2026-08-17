@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Ruff and mypy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Sync locked dependencies
+        run: uv sync --project backend --locked
+      - name: Run Ruff lint
+        run: uv run --project backend ruff check --config=backend/pyproject.toml backend
+      - name: Check Ruff formatting
+        run: uv run --project backend ruff format --check --config=backend/pyproject.toml backend
+      - name: Run mypy
+        run: uv run --project backend mypy --config-file=backend/pyproject.toml backend
+
+  readme-command-consistency:
+    name: README command consistency
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Check README commands
+        run: bash scripts/check-readme-ci-commands.sh
