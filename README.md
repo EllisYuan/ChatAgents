@@ -3,7 +3,7 @@
 
 **一个集成了 Web 搜索、内容提取和深度思考能力的智能体助手**
 
-![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)
+![Python](https://img.shields.io/badge/Python-3.11--3.12-blue.svg)
 ![Streamlit](https://img.shields.io/badge/Streamlit-1.32+-red.svg)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.109+-green.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
@@ -61,7 +61,7 @@
 
 ### 环境要求
 
-- **Python**: 3.11+
+- **Python**: 3.11–3.12
 - **API 密钥**:
   - [Anthropic Claude API](https://console.anthropic.com/)
   - [Tavily API](https://tavily.com/)
@@ -75,25 +75,15 @@ git clone <your-repo-url>
 cd intelligent-chatbot
 ```
 
-#### 2. 创建虚拟环境
+#### 2. 安装依赖
+
+安装 [uv](https://docs.astral.sh/uv/) 后，在仓库根目录执行：
 
 ```bash
-# Windows
-python -m venv venv
-venv\Scripts\activate
-
-# macOS/Linux
-python3 -m venv venv
-source venv/bin/activate
+uv sync --project backend
 ```
 
-#### 3. 安装依赖
-
-```bash
-pip install -r requirements.txt
-```
-
-#### 4. 配置环境变量
+#### 3. 配置环境变量
 
 ```bash
 # 复制示例配置文件
@@ -104,16 +94,16 @@ cp .env.sample .env
 # TAVILY_API_KEY=tvly-your-key-here
 ```
 
-#### 5. 启动应用
+#### 4. 启动应用
 
 **方法 A：分别启动（推荐开发）**
 
 ```bash
 # 终端 1：启动后端
-python app.py
+uv run --project backend python app.py
 
 # 终端 2：启动前端
-streamlit run streamlit_app.py
+uv run --project backend streamlit run streamlit_app.py
 ```
 
 **方法 B：使用 Docker Compose**
@@ -122,7 +112,7 @@ streamlit run streamlit_app.py
 docker-compose up -d --build
 ```
 
-#### 6. 访问应用
+#### 5. 访问应用
 
 - **前端**: http://localhost:8501
 - **后端 API**: http://localhost:8080
@@ -285,7 +275,8 @@ intelligent-chatbot/
 ├── .streamlit/                 # Streamlit 配置
 ├── app.py                      # FastAPI 后端服务器
 ├── streamlit_app.py            # Streamlit 前端应用
-├── requirements.txt            # Python 依赖
+├── backend/pyproject.toml      # Python 项目元数据
+├── backend/uv.lock             # 锁定依赖
 ├── .env                        # 环境变量（本地）
 ├── .env.sample                 # 环境变量示例
 ├── .gitignore                  # Git 忽略文件
@@ -581,7 +572,7 @@ uv run --project backend mypy --config-file=backend/pyproject.toml backend
 
 - 📝 博客: [https://blog.geekie.site](https://blog.geekie.site)
 - 📧 邮箱: [yuan.sn@outlook.com](mailto:yuan.sn@outlook.com)
-- 🔗 GitHub: [geekie-yuan](https://github.com/geekie-yuan)
+- 🔗 GitHub: [EllisYuan](https://github.com/EllisYuan)
 
 ## 🙏 致谢
 

@@ -26,7 +26,7 @@ async def run(arguments: dict[str, Any], ctx: ToolExecutionContext) -> ToolResul
     if not isinstance(doc, ReaderDocument):
         port = JinaReaderPort(ctx.http_client)
         raw_markdown = await port.fetch(url)
-        doc = build_document(url, raw_markdown)
+        doc = build_document(url, raw_markdown, calibration=ctx.token_calibration)
         ctx.memo_set(memo_key, doc)
 
     return assemble_result(doc, section_arg)

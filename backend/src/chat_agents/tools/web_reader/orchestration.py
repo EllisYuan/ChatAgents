@@ -5,10 +5,10 @@
 
 from __future__ import annotations
 
-import math
 import re
 from dataclasses import dataclass, field
 
+from ...token_estimation import count_tokens, estimate_tokens
 from ..types import ToolResult
 
 TOKEN_THRESHOLD = 8_000  # 拍的，不是算的——待评测用章节选错率与答案完整率校准（ADR-0005）
@@ -16,20 +16,22 @@ FALLBACK_TRUNCATE_CHARS = 6_000
 
 _HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.+?)\s*$", re.MULTILINE)
 
-# CJK 统一表意文字、假名、韩文音节的常见区段——这些字符按 1 字 ≈ 1 token 估算，
-# 其余按 4 字符 ≈ 1 token 估算（拉丁文常见比例）。
-_CJK_RANGES = (
-    (0x4E00, 0x9FFF),
-    (0x3400, 0x4DBF),
-    (0xF900, 0xFAFF),
-    (0x3040, 0x30FF),
-    (0xAC00, 0xD7A3),
-)
-
-
-def _is_cjk(char: str) -> bool:
-    code_point = ord(char)
-    return any(lo <= code_point <= hi for lo, hi in _CJK_RANGES)
+__all__ = [
+    "FALLBACK_TRUNCATE_CHARS",
+    "TOKEN_THRESHOLD",
+    "ReaderDocument",
+    "Section",
+    "assemble_result",
+    "build_document",
+    "count_tokens",
+    "normalize_markdown",
+    "parse_section_indices",
+    "parse_sections",
+    "render_full",
+    "render_sections",
+    "render_structure",
+    "render_truncated",
+]
 
 
 def normalize_markdown(raw: str) -> str:
@@ -38,15 +40,6 @@ def normalize_markdown(raw: str) -> str:
     normalized = "\n".join(lines).strip("\n")
     normalized = re.sub(r"\n{3,}", "\n\n", normalized)
     return normalized
-
-
-def count_tokens(text: str) -> int:
-    """估算文本的 token 数——用于渐进披露判阈值，不是计费口径来源（issue #47 另行校准）。"""
-    if not text:
-        return 0
-    cjk_count = sum(1 for char in text if _is_cjk(char))
-    other_count = len(text) - cjk_count
-    return cjk_count + math.ceil(other_count / 4)
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,7 +59,7 @@ class ReaderDocument:
     sections: list[Section] = field(default_factory=list)
 
 
-def parse_sections(markdown: str) -> list[Section]:
+def parse_sections(markdown: str, *, calibration: float = 1.0) -> list[Section]:
     """按 Markdown 标题切章节，编号从 1 开始，只做一级（ADR-0005：不做多级路由）。"""
     headings = list(_HEADING_RE.finditer(markdown))
     if not headings:
@@ -85,19 +78,22 @@ def parse_sections(markdown: str) -> list[Section]:
                 level=level,
                 title=title,
                 content=content,
-                token_count=count_tokens(content),
+                token_count=estimate_tokens(content, calibration=calibration),
             )
         )
     return sections
 
 
-def build_document(url: str, raw_markdown: str) -> ReaderDocument:
+def build_document(url: str, raw_markdown: str, *, calibration: float = 1.0) -> ReaderDocument:
+    """`calibration` 是该次运行主模型的校准系数，由调用方（工具执行上下文）
+    传入——分节阈值判断要用校准后的估算，编排层本身不查询任何模型（ADR-0020）。
+    """
     markdown = normalize_markdown(raw_markdown)
     return ReaderDocument(
         url=url,
         markdown=markdown,
-        token_count=count_tokens(markdown),
-        sections=parse_sections(markdown),
+        token_count=estimate_tokens(markdown, calibration=calibration),
+        sections=parse_sections(markdown, calibration=calibration),
     )
 
 

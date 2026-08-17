@@ -4,7 +4,7 @@
 
 **An intelligent agent assistant integrated with Web search, content extraction, and deep thinking capabilities**
 
-![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)
+![Python](https://img.shields.io/badge/Python-3.11--3.12-blue.svg)
 ![Streamlit](https://img.shields.io/badge/Streamlit-1.32+-red.svg)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.109+-green.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
@@ -64,7 +64,7 @@ Through a hybrid architecture (Streamlit frontend + FastAPI backend), it provide
 
 ### Prerequisites
 
-- **Python**: 3.11+
+- **Python**: 3.11–3.12
 - **API Keys**:
   - [Anthropic Claude API](https://console.anthropic.com/)
   - [Tavily API](https://tavily.com/)
@@ -78,25 +78,15 @@ git clone <your-repo-url>
 cd intelligent-chatbot
 ```
 
-#### 2. Create Virtual Environment
+#### 2. Install Dependencies
+
+After installing [uv](https://docs.astral.sh/uv/), run this from the repository root:
 
 ```bash
-# Windows
-python -m venv venv
-venv\Scripts\activate
-
-# macOS/Linux
-python3 -m venv venv
-source venv/bin/activate
+uv sync --project backend
 ```
 
-#### 3. Install Dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-#### 4. Configure Environment Variables
+#### 3. Configure Environment Variables
 
 ```bash
 # Copy sample configuration file
@@ -107,16 +97,16 @@ cp .env.sample .env
 # TAVILY_API_KEY=tvly-your-key-here
 ```
 
-#### 5. Start the Application
+#### 4. Start the Application
 
 **Method A: Start Separately (Recommended for Development)**
 
 ```bash
 # Terminal 1: Start backend
-python app.py
+uv run --project backend python app.py
 
 # Terminal 2: Start frontend
-streamlit run streamlit_app.py
+uv run --project backend streamlit run streamlit_app.py
 ```
 
 **Method B: Use Docker Compose**
@@ -125,7 +115,7 @@ streamlit run streamlit_app.py
 docker-compose up --build
 ```
 
-#### 6. Access the Application
+#### 5. Access the Application
 
 - **Frontend**: http://localhost:8501
 - **Backend API**: http://localhost:8080
@@ -232,7 +222,8 @@ intelligent-chatbot/
 ├── .streamlit/                 # Streamlit configuration
 ├── app.py                      # FastAPI backend server
 ├── streamlit_app.py            # Streamlit frontend application
-├── requirements.txt            # Python dependencies
+├── backend/pyproject.toml      # Python project metadata
+├── backend/uv.lock             # Locked dependencies
 ├── .env                        # Environment variables (local)
 ├── .env.sample                 # Environment variable example
 ├── .gitignore                  # Git ignore file
@@ -355,7 +346,7 @@ This project is open-sourced under the [MIT License](LICENSE).
 
 - 📝 Blog: [https://blog.geekie.site](https://blog.geekie.site)
 - 📧 Email: [yuan.sn@outlook.com](mailto:yuan.sn@outlook.com)
-- 🔗 GitHub: [geekie-yuan](https://github.com/geekie-yuan)
+- 🔗 GitHub: [EllisYuan](https://github.com/EllisYuan)
 
 ## 🙏 Acknowledgements
 

@@ -19,6 +19,7 @@ class ToolExecutionContext(Protocol):
     """
 
     run_id: str
+    token_calibration: float  # 本次运行主模型的 token 校准系数，无实测数据时为 1.0（ADR-0020）
 
     @property
     def http_client(self) -> Any:  # httpx.AsyncClient，避免 tools/ 依赖具体类型来源

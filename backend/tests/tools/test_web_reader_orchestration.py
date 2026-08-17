@@ -104,6 +104,16 @@ def test_count_tokens_is_a_pure_deterministic_function():
     assert count_tokens("") == 0
 
 
+def test_build_document_applies_calibration_to_token_counts():
+    markdown = "# 一\n" + "内容 " * 100
+
+    uncalibrated = build_document("https://a.example", markdown)
+    calibrated = build_document("https://a.example", markdown, calibration=1.5)
+
+    assert calibrated.token_count > uncalibrated.token_count
+    assert calibrated.sections[0].token_count > uncalibrated.sections[0].token_count
+
+
 def test_run_memoizes_the_fetched_document_across_calls_in_one_run():
     fetch_calls = []
 
@@ -118,6 +128,7 @@ def test_run_memoizes_the_fetched_document_across_calls_in_one_run():
     class FakeCtx:
         run_id = "run-1"
         http_client = object()
+        token_calibration = 1.0
 
         def __init__(self):
             self._memo = {}

@@ -46,6 +46,7 @@ class RunToolContext:
     run_id: str
     http_client: httpx.AsyncClient
     span_recorder: SpanRecorder = field(default_factory=NullSpanRecorder)
+    token_calibration: float = 1.0  # 无实测数据时的退化值——本项目尚无观测层数据源（issue #47）
     _memo: dict[str, Any] = field(default_factory=dict)
 
     def memo_get(self, key: str) -> Any | None:
