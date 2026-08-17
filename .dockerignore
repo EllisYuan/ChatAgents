@@ -1,0 +1,10 @@
+.git
+.claude
+.scratch
+.venv
+**/.venv
+**/__pycache__
+*.py[cod]
+.env
+.env.*
+data
