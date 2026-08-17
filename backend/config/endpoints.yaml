@@ -1,0 +1,21 @@
+# 端点档案——应用配置，随仓库走（ADR-0032）。只存 key 的环境变量名，不存 key 本身。
+#
+# protocol 省略时默认为 openai_responses。同一个 base_url 可以配多份档案，
+# 各自声明不同的 protocol——协议是端点档案的属性，不能从模型标识推断（ADR-0014）。
+
+default_profile: anthropic-official
+
+endpoints:
+  - name: anthropic-official
+    protocol: anthropic_messages
+    base_url: https://api.anthropic.com
+    auth_field: x-api-key
+    auth_secret_ref: ANTHROPIC_API_KEY
+    main_model: claude-sonnet-4-5-20250929
+
+  - name: openai-official
+    protocol: openai_responses
+    base_url: https://api.openai.com/v1
+    auth_field: Authorization
+    auth_secret_ref: OPENAI_API_KEY
+    main_model: gpt-5.1
