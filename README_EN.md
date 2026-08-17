@@ -86,6 +86,12 @@ After installing [uv](https://docs.astral.sh/uv/), run this from the repository 
 uv sync --project backend
 ```
 
+Before running tests for the first time, start the local PostgreSQL service:
+
+```bash
+docker compose up -d postgres
+```
+
 #### 3. Configure Environment Variables
 
 ```bash

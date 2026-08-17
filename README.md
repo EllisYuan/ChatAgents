@@ -83,6 +83,12 @@ cd intelligent-chatbot
 uv sync --project backend
 ```
 
+首次运行测试前，启动本地 PostgreSQL：
+
+```bash
+docker compose up -d postgres
+```
+
 #### 3. 配置环境变量
 
 ```bash
@@ -549,6 +555,7 @@ docker stats chatbot-backend chatbot-frontend
 
 ```bash ci-command
 uv sync --project backend --locked
+uv run --project backend pytest backend/tests
 uv run --project backend ruff check --config=backend/pyproject.toml backend
 uv run --project backend ruff format --check --config=backend/pyproject.toml backend
 uv run --project backend mypy --config-file=backend/pyproject.toml backend

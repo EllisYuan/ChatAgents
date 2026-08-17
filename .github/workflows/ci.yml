@@ -8,8 +8,24 @@ permissions:
 
 jobs:
   quality:
-    name: Ruff and mypy
+    name: Ruff, mypy, and database integration
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/chat_agents
+    services:
+      postgres:
+        image: postgres:18.4
+        env:
+          POSTGRES_DB: chat_agents
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d chat_agents"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -19,6 +35,8 @@ jobs:
           enable-cache: true
       - name: Sync locked dependencies
         run: uv sync --project backend --locked
+      - name: Run backend tests
+        run: uv run --project backend pytest backend/tests
       - name: Run Ruff lint
         run: uv run --project backend ruff check --config=backend/pyproject.toml backend
       - name: Check Ruff formatting

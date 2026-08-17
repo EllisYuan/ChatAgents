@@ -35,4 +35,11 @@ while IFS= read -r command; do
   fi
 done <"$tmp_dir/readme-commands"
 
-printf 'README ci-command entries match %s\n' "$workflow"
+compose_postgres_image=$(grep -E -m1 '^[[:space:]]*image:[[:space:]]+postgres:[^[:space:]]+' "$repo_root/docker-compose.yml" | sed -E 's/^[[:space:]]*//' || true)
+workflow_postgres_image=$(grep -E -m1 '^[[:space:]]*image:[[:space:]]+postgres:[^[:space:]]+' "$workflow" | sed -E 's/^[[:space:]]*//' || true)
+if [[ "$compose_postgres_image" != "image: postgres:18.4" || "$workflow_postgres_image" != "image: postgres:18.4" ]]; then
+  printf 'PostgreSQL image must be postgres:18.4 in compose and CI\n' >&2
+  exit 1
+fi
+
+printf 'README ci-command entries and PostgreSQL versions are consistent\n'
