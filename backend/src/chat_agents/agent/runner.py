@@ -66,6 +66,7 @@ class AgentRunner:
         auxiliary_model: str,
         effort: EffortTier,
         http_client: Any,
+        run_id: str | None = None,
     ) -> AsyncIterator[RunEvent]:
         """跑一条完整运行：用户消息 → 模型调用 → （工具调用 → 模型调用）* → 最终回答。
 
@@ -80,7 +81,7 @@ class AgentRunner:
         「Runner 零 HTTP import」这条验收标准的直接后果，不是偷懒。
         """
         del auxiliary_model  # 尚无调用者（issue #57），签名先留住见上方 docstring
-        run_id = str(uuid4())
+        run_id = run_id if run_id is not None else str(uuid4())
         history: list[ModelMessage] = list(messages)
         port = self._model_port_factory(profile)
         tool_defs = self._tool_executor.tool_definitions()

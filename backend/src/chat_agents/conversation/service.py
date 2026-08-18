@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Collection, Iterable, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -13,6 +14,7 @@ from ..db.app import Message as MessageRow
 from ..db.app import Session as SessionRow
 from ..exceptions import ProtocolError
 from ..llm.message import ModelMessage, TextBlock, ToolCallBlock, ToolResultBlock
+from .masking import RETENTION_WINDOW, MaskedObservation, MaskingProjection, mask_tool_observations
 from .models import (
     SessionDetail,
     SessionSummary,
@@ -25,6 +27,23 @@ from .repository import ConversationRepository
 
 _ORPHAN_TOOL_RESULT = "Tool call ended before a result was recorded."
 _TITLE_LIMIT = 30
+OBSERVATION_KEEP = RETENTION_WINDOW
+
+
+@dataclass(frozen=True, slots=True)
+class ModelInputProjection:
+    """一次模型输入重建的消息投影及其掩蔽事实。"""
+
+    messages: list[ModelMessage]
+    masked_observations: tuple[MaskedObservation, ...]
+    retention_window: int = RETENTION_WINDOW
+
+    @property
+    def attributes(self) -> dict[str, Any]:
+        return MaskingProjection(
+            messages=self.messages,
+            masked_observations=self.masked_observations,
+        ).attributes
 
 
 def _title_from_message(text: str) -> str:
@@ -65,19 +84,18 @@ def _repair_tool_results(
     return tuple(repaired)
 
 
-def project_messages(
-    rows: Iterable[MessageRow], *, round_trip_from_seq: int | None = None
+def _project_messages_unmasked(
+    rows: Iterable[MessageRow],
+    *,
+    round_trip_from_seq: int | None = None,
+    skipped_seq_ranges: Sequence[tuple[int, int]] = (),
 ) -> list[ModelMessage]:
-    """Project stored messages into a valid protocol-neutral model sequence.
+    """先重建有效消息序列，再由外层投影阶段施加观察掩蔽。"""
 
-    ``system`` is intentionally not a valid stored role and is never emitted.
-    An assistant tool call must be immediately followed by a tool result.  If a
-    process stopped before that result was persisted, a synthetic protocol
-    error result is inserted in this projection only; the source row is never
-    changed.
-    """
+    def is_skipped(seq: int) -> bool:
+        return any(start <= seq <= end for start, end in skipped_seq_ranges)
 
-    ordered = sorted(rows, key=lambda row: row.seq)
+    ordered = [row for row in sorted(rows, key=lambda row: row.seq) if not is_skipped(row.seq)]
     projected: list[ModelMessage] = []
     index = 0
     while index < len(ordered):
@@ -99,14 +117,48 @@ def project_messages(
                 projected.append(ModelMessage(role="tool", content=results))
                 index += 2
                 continue
-            projected.append(
-                ModelMessage(
-                    role="tool",
-                    content=_repair_tool_results(calls, ()),
-                )
-            )
+            projected.append(ModelMessage(role="tool", content=_repair_tool_results(calls, ())))
         index += 1
     return projected
+
+
+def project_messages(
+    rows: Iterable[MessageRow],
+    *,
+    round_trip_from_seq: int | None = None,
+    skipped_seq_ranges: Sequence[tuple[int, int]] = (),
+    retention_window: int = RETENTION_WINDOW,
+) -> list[ModelMessage]:
+    """重建模型输入，并在投影期掩蔽较早的工具观察。"""
+
+    return project_messages_with_metadata(
+        rows,
+        round_trip_from_seq=round_trip_from_seq,
+        skipped_seq_ranges=skipped_seq_ranges,
+        retention_window=retention_window,
+    ).messages
+
+
+def project_messages_with_metadata(
+    rows: Iterable[MessageRow],
+    *,
+    round_trip_from_seq: int | None = None,
+    skipped_seq_ranges: Sequence[tuple[int, int]] = (),
+    retention_window: int = RETENTION_WINDOW,
+) -> ModelInputProjection:
+    """重建模型输入，并返回本次掩蔽的观测事实。"""
+
+    projected = _project_messages_unmasked(
+        rows,
+        round_trip_from_seq=round_trip_from_seq,
+        skipped_seq_ranges=skipped_seq_ranges,
+    )
+    masking = mask_tool_observations(projected, retention_window=retention_window)
+    return ModelInputProjection(
+        messages=masking.messages,
+        masked_observations=masking.masked_observations,
+        retention_window=retention_window,
+    )
 
 
 class ConversationService:
