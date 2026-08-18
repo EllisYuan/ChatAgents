@@ -18,9 +18,16 @@ from ..llm.message import ModelMessage, ToolResultBlock
 from .service import ConversationService
 
 
-async def _append(
+async def _append_message_in_short_transaction(
     *, session_factory: Any, session_id: UUID, message_id: UUID, message: ModelMessage
 ) -> None:
+    """同 ``ConversationService.short_transaction_append`` 的事务写法。
+
+    不直接调那个实例方法——它的实现完全不碰 ``self``，调它得先造一个可丢弃的
+    ``ConversationService`` 占位实例，反而更绕；这里保持同样的「不借用请求级
+    session」短事务写法，专供 ``persist`` 逐条增量写用。
+    """
+
     async with session_factory() as session, session.begin():
         service = ConversationService(session)
         await service.append_model_message(
@@ -41,7 +48,7 @@ async def persist(
 
     async for event in events:
         if isinstance(event, IterationCompleted):
-            await _append(
+            await _append_message_in_short_transaction(
                 session_factory=session_factory,
                 session_id=session_id,
                 message_id=_assistant_message_id(event.run_id, event.iteration),
@@ -63,7 +70,7 @@ async def persist(
                         for call_id in tool_call_order
                     ),
                 )
-                await _append(
+                await _append_message_in_short_transaction(
                     session_factory=session_factory,
                     session_id=session_id,
                     message_id=tool_message_id(event.run_id, event.iteration),

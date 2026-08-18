@@ -42,8 +42,10 @@ class ToolResultPayload(BaseModel):
     """`chatagents.tool_result`——渲染文本走 `TOOL_CALL_RESULT`，结构化走这里。
 
     `result` 与 `TOOL_CALL_RESULT.content` 同源（`ToolFinished.result`）——
-    外部失败已由 `ToolExecutor` 编码进这段文本本身，这里不重复建错误标记。
+    外部失败已由 `ToolExecutor` 编码进这段文本本身；`agent.events.ToolFinished`
+    没有单独的错误标记字段，这里也就没有——建一个凭空猜的布尔值比没有更误导人。
     """
 
     tool_call_id: str
     result: str
+    duration_ms: int

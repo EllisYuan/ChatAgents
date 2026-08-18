@@ -40,15 +40,14 @@ def _usage(**overrides: object) -> Usage:
         "reasoning_tokens": None,
     }
     defaults.update(overrides)
-    return Usage(**defaults)  # type: ignore[arg-type]
+    return Usage(**defaults)
 
 
 def _frames(source: AsyncIterator[RunEvent]) -> list[dict[str, object]]:
     async def collect() -> list[dict[str, object]]:
         out = []
         async for line in encode_sse(source, session_id=SESSION_ID, run_id=RUN_ID, model="gpt"):
-            assert line.startswith("data: ") and line.endswith("\n\n")
-            out.append(json.loads(line[len("data: ") : -2]))
+            out.append(json.loads(line))
         return out
 
     return asyncio.run(collect())
@@ -91,8 +90,10 @@ def test_text_only_run_emits_expected_type_sequence() -> None:
         "reasoning_tokens": None,
     }
     assert span_frame["name"] == "chatagents.span"
-    assert set(span_frame["value"]) == {"span_id", "parent_span_id", "kind", "duration_ms"}
-    assert span_frame["value"]["kind"] == "llm"
+    span_value = span_frame["value"]
+    assert isinstance(span_value, dict)
+    assert set(span_value) == {"span_id", "parent_span_id", "kind", "duration_ms"}
+    assert span_value["kind"] == "llm"
 
 
 def test_reasoning_then_text_closes_reasoning_before_opening_text() -> None:
@@ -162,7 +163,12 @@ def test_tool_round_trip_emits_both_result_outlets() -> None:
     assert "TOOL_CALL_END" in types
     assert "TOOL_CALL_RESULT" in types
     tool_result_custom = next(f for f in frames if f.get("name") == "chatagents.tool_result")
-    assert tool_result_custom["value"] == {"tool_call_id": "call-1", "result": "found it"}
+    tool_result_value = tool_result_custom["value"]
+    assert isinstance(tool_result_value, dict)
+    assert tool_result_value["tool_call_id"] == "call-1"
+    assert tool_result_value["result"] == "found it"
+    assert isinstance(tool_result_value["duration_ms"], int)
+    assert tool_result_value["duration_ms"] >= 0
     result_event = next(f for f in frames if f["type"] == "TOOL_CALL_RESULT")
     assert result_event["content"] == "found it"
     assert result_event["role"] == "tool"

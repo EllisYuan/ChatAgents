@@ -1,10 +1,12 @@
 """``encode_sse``——``RunEvent`` → AG-UI over SSE 的唯一映射处（ADR-0009）。
 
-一处 ``match``：把 ``agent/`` 吐出的领域事件翻成 AG-UI 事件，再交
-``ag_ui.encoder.EventEncoder`` 编成 ``data: {...}\\n\\n``。这是三重包装的最外
-层，也是「流开始后失败走 ``RUN_ERROR``、HTTP 仍是 200」这条纪律唯一的执行位置
-——包一层 ``try/except Exception``，任何从 ``persist``/``observe``/``runner``
-冒出来的异常，在这里收敛成一条 ``RUN_ERROR`` 后结束流，不再向上抛。
+一处 ``match``：把 ``agent/`` 吐出的领域事件翻成 AG-UI 事件，序列化规则与
+``ag_ui.encoder.EventEncoder`` 一致（``by_alias``、丢 ``None``），帧头（
+``data: ...\\n\\n``、分隔符、心跳、断连收尾）交给 ``sse_starlette``
+的 ``EventSourceResponse`` 统一处理，这里只产出 JSON 信封本身。这是三重包装
+的最外层，也是「流开始后失败走 ``RUN_ERROR``、HTTP 仍是 200」这条纪律唯一的
+执行位置——包一层 ``try/except Exception``，任何从 ``persist``/``observe``/
+``runner`` 冒出来的异常，在这里收敛成一条 ``RUN_ERROR`` 后结束流，不再向上抛。
 """
 
 from __future__ import annotations
@@ -12,7 +14,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import AsyncIterator
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 import structlog
@@ -37,7 +39,6 @@ from ag_ui.core import (
     ToolCallResultEvent,
     ToolCallStartEvent,
 )
-from ag_ui.encoder import EventEncoder
 
 from ..agent.events import (
     IterationCompleted,
@@ -59,11 +60,32 @@ from .custom_events import SpanPayload, ToolResultPayload, UsagePayload
 
 logger = structlog.get_logger(__name__)
 
-_encoder = EventEncoder()
+
+def _emit(event: Any) -> str:
+    """按 ``ag_ui.encoder.EventEncoder`` 同款规则序列化（``by_alias``、丢 ``None``）。
+
+    不经它的 ``encode()``——那一步会把 JSON 再包一层 ``data: ...\\n\\n`` 的 SSE
+    帧头，而帧头交给 ``sse_starlette.EventSourceResponse`` 统一处理（分隔符、
+    心跳、断连收尾都在那一层），这里只产出信封本身，避免帧头套两层。
+    """
+
+    result = event.model_dump_json(by_alias=True, exclude_none=True)
+    return result if isinstance(result, str) else str(result)
 
 
-def _emit(event: object) -> str:
-    return str(_encoder.encode(event))
+async def _close_reasoning(reasoning_id: UUID) -> AsyncIterator[str]:
+    """收尾一轮的 ``REASONING_*`` 分组——三处调用点（文本开始前/迭代结束/运行失败）共用。"""
+
+    yield _emit(
+        ReasoningMessageEndEvent(type=EventType.REASONING_MESSAGE_END, message_id=str(reasoning_id))
+    )
+    yield _emit(ReasoningEndEvent(type=EventType.REASONING_END, message_id=str(reasoning_id)))
+
+
+async def _close_text(assistant_id: UUID) -> AsyncIterator[str]:
+    """收尾一轮的 ``TEXT_MESSAGE_*`` 分组——迭代结束/运行失败两处调用点共用。"""
+
+    yield _emit(TextMessageEndEvent(type=EventType.TEXT_MESSAGE_END, message_id=str(assistant_id)))
 
 
 async def encode_sse(
@@ -84,6 +106,7 @@ async def encode_sse(
     current_assistant_id: UUID | None = None
     current_reasoning_id: UUID | None = None
     iteration_started_at = time.monotonic()
+    tool_started_at: dict[str, float] = {}
 
     try:
         async for event in events:
@@ -103,17 +126,9 @@ async def encode_sse(
                 case TextDelta(text=text):
                     assert current_assistant_id is not None
                     if reasoning_open:
-                        yield _emit(
-                            ReasoningMessageEndEvent(
-                                type=EventType.REASONING_MESSAGE_END,
-                                message_id=str(current_reasoning_id),
-                            )
-                        )
-                        yield _emit(
-                            ReasoningEndEvent(
-                                type=EventType.REASONING_END, message_id=str(current_reasoning_id)
-                            )
-                        )
+                        assert current_reasoning_id is not None
+                        async for frame in _close_reasoning(current_reasoning_id):
+                            yield frame
                         reasoning_open = False
                     if not text_open:
                         yield _emit(
@@ -159,25 +174,14 @@ async def encode_sse(
 
                 case IterationCompleted(iteration=iteration, usage=usage):
                     if reasoning_open:
-                        yield _emit(
-                            ReasoningMessageEndEvent(
-                                type=EventType.REASONING_MESSAGE_END,
-                                message_id=str(current_reasoning_id),
-                            )
-                        )
-                        yield _emit(
-                            ReasoningEndEvent(
-                                type=EventType.REASONING_END, message_id=str(current_reasoning_id)
-                            )
-                        )
+                        assert current_reasoning_id is not None
+                        async for frame in _close_reasoning(current_reasoning_id):
+                            yield frame
                         reasoning_open = False
                     if text_open:
-                        yield _emit(
-                            TextMessageEndEvent(
-                                type=EventType.TEXT_MESSAGE_END,
-                                message_id=str(current_assistant_id),
-                            )
-                        )
+                        assert current_assistant_id is not None
+                        async for frame in _close_text(current_assistant_id):
+                            yield frame
                         text_open = False
                     yield _emit(
                         StepFinishedEvent(
@@ -213,6 +217,7 @@ async def encode_sse(
                     )
 
                 case ToolStarted(tool_call_id=tool_call_id, name=name, arguments=arguments):
+                    tool_started_at[tool_call_id] = time.monotonic()
                     yield _emit(
                         ToolCallStartEvent(
                             type=EventType.TOOL_CALL_START,
@@ -230,6 +235,10 @@ async def encode_sse(
                     )
 
                 case ToolFinished(iteration=iteration, tool_call_id=tool_call_id, result=result):
+                    started_at = tool_started_at.pop(tool_call_id, None)
+                    tool_duration_ms = (
+                        int((time.monotonic() - started_at) * 1000) if started_at is not None else 0
+                    )
                     yield _emit(
                         ToolCallEndEvent(type=EventType.TOOL_CALL_END, tool_call_id=tool_call_id)
                     )
@@ -247,7 +256,9 @@ async def encode_sse(
                             type=EventType.CUSTOM,
                             name="chatagents.tool_result",
                             value=ToolResultPayload(
-                                tool_call_id=tool_call_id, result=result
+                                tool_call_id=tool_call_id,
+                                result=result,
+                                duration_ms=tool_duration_ms,
                             ).model_dump(),
                         )
                     )
@@ -260,25 +271,12 @@ async def encode_sse(
                     )
 
                 case RunFailed(reason=reason):
-                    if reasoning_open:
-                        yield _emit(
-                            ReasoningMessageEndEvent(
-                                type=EventType.REASONING_MESSAGE_END,
-                                message_id=str(current_reasoning_id),
-                            )
-                        )
-                        yield _emit(
-                            ReasoningEndEvent(
-                                type=EventType.REASONING_END, message_id=str(current_reasoning_id)
-                            )
-                        )
-                    if text_open:
-                        yield _emit(
-                            TextMessageEndEvent(
-                                type=EventType.TEXT_MESSAGE_END,
-                                message_id=str(current_assistant_id),
-                            )
-                        )
+                    if reasoning_open and current_reasoning_id is not None:
+                        async for frame in _close_reasoning(current_reasoning_id):
+                            yield frame
+                    if text_open and current_assistant_id is not None:
+                        async for frame in _close_text(current_assistant_id):
+                            yield frame
                     yield _emit(
                         RunErrorEvent(
                             type=EventType.RUN_ERROR, message=reason, code=RUN_FAILED_CODE

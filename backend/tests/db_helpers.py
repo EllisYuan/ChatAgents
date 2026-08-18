@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
+import sys
 import uuid
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
@@ -18,6 +20,11 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+
+if sys.platform == "win32":
+    # psycopg 的异步驱动不支持 Windows 默认的 ProactorEventLoop（环境限制，与本票
+    # 无关）；测试专用，只在这个进程里切换事件循环策略。
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 _DATABASE_URL = "postgresql+psycopg://postgres:postgres@localhost:5432/chat_agents"
 _BACKEND_ROOT = Path(__file__).resolve().parents[1]
