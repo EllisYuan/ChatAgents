@@ -8,6 +8,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import TypeVar
+
 from .exceptions import (
     AuthenticationFailed,
     ChatAgentsError,
@@ -42,10 +45,19 @@ UNKNOWN_HTTP_STATUS = 500
 # 文本），固定用这个码，与 UNKNOWN_ERROR_CODE 区分开，便于前端/评测按码分流。
 RUN_FAILED_CODE = "run_failed"
 
+T = TypeVar("T")
+
+
+def _lookup(mapping: Mapping[type[ChatAgentsError], T], exc: Exception, default: T) -> T:
+    for error_type, value in mapping.items():
+        if isinstance(exc, error_type):
+            return value
+    return default
+
 
 def error_code(exc: Exception) -> str:
-    return ERROR_CODES.get(type(exc), UNKNOWN_ERROR_CODE)
+    return _lookup(ERROR_CODES, exc, UNKNOWN_ERROR_CODE)
 
 
 def http_status(exc: Exception) -> int:
-    return HTTP_STATUS.get(type(exc), UNKNOWN_HTTP_STATUS)
+    return _lookup(HTTP_STATUS, exc, UNKNOWN_HTTP_STATUS)

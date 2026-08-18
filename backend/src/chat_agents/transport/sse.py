@@ -63,7 +63,7 @@ _encoder = EventEncoder()
 
 
 def _emit(event: object) -> str:
-    return _encoder.encode(event)  # type: ignore[arg-type]
+    return str(_encoder.encode(event))
 
 
 async def encode_sse(

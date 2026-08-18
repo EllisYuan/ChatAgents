@@ -6,6 +6,7 @@
 
 import asyncio
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from chat_agents.llm.adapters.anthropic_messages import AnthropicMessagesAdapter
@@ -70,7 +71,7 @@ class _FakeClient:
         self.messages = _FakeMessages(stream)
 
 
-def _happy_path_events() -> list[object]:
+def _happy_path_events() -> list[Any]:
     return [
         SimpleNamespace(
             type="message_start",

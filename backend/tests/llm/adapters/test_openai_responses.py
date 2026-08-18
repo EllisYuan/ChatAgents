@@ -2,6 +2,7 @@
 
 import asyncio
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from chat_agents.llm.adapters.openai_responses import OpenAIResponsesAdapter
@@ -77,7 +78,7 @@ def _function_call_item(call_id: str, *, arguments: str = '{"a": 1, "b": 3}') ->
     )
 
 
-def _happy_path_events() -> list[object]:
+def _happy_path_events() -> list[Any]:
     return [
         SimpleNamespace(
             type="response.output_item.added",
