@@ -13,6 +13,12 @@ def test_default_endpoints_config_path_points_at_backend_config() -> None:
     assert settings.endpoints_config_path.parent.name == "config"
 
 
+def test_model_discovery_can_be_disabled_via_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CHATAGENTS_MODEL_DISCOVERY_ENABLED", "false")
+
+    assert Settings().model_discovery_enabled is False
+
+
 def test_endpoints_config_path_overridable_via_env(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

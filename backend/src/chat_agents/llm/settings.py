@@ -17,3 +17,4 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="CHATAGENTS_", extra="ignore")
 
     endpoints_config_path: Path = Field(default=_DEFAULT_ENDPOINTS_CONFIG_PATH)
+    model_discovery_enabled: bool = True

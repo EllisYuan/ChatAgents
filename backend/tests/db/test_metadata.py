@@ -17,6 +17,7 @@ def test_app_and_obs_tables_registered() -> None:
         "app.prompt_versions",
         "app.tool_schema_versions",
         "app.discovered_model",
+        "app.discovered_model_refresh",
         "obs.run",
         "obs.span",
     }

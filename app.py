@@ -77,7 +77,7 @@ class AgentRequest(BaseModel):
     thread_id: str  # 会话 ID
     agent_type: str  # 智能体类型（fast/deep）
     llm_provider: str = LLMProvider.CLAUDE  # LLM 提供商（默认 Claude）
-    llm_model: str = "sonnet"  # LLM 模型名称
+    llm_model: str  # 端点 /v1/models 发现的原始模型标识
 
 
 @app.get("/")
@@ -158,18 +158,8 @@ async def stream_agent(body: AgentRequest, request: Request):
         logger.error(f"创建主 LLM 失败: {e}")
         raise HTTPException(status_code=500, detail=f"创建主 LLM 失败: {str(e)}")
 
-    # 创建摘要 LLM（使用快速模型）
-    try:
-        summary_llm = LLMConfig.create_claude(
-            model="haiku",
-            api_key=claude_api_key,
-            temperature=0.5,
-            max_tokens=1024,
-            streaming=False
-        )
-    except Exception as e:
-        logger.warning(f"创建摘要 LLM 失败，使用主 LLM: {e}")
-        summary_llm = main_llm
+    # 模型清单发现与 auxiliary 角色接入后，再由配置选择独立摘要模型。
+    summary_llm = main_llm
 
     # 选择提示词（每次请求时动态获取，确保日期实时更新）
     if body.agent_type == "fast":

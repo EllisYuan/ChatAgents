@@ -148,6 +148,7 @@ def test_upgrade_head_creates_application_and_observability_schemas() -> None:
             "prompt_versions",
             "tool_schema_versions",
             "discovered_model",
+            "discovered_model_refresh",
         }
         assert obs_tables == {"run", "span"}
 

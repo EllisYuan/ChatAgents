@@ -101,13 +101,9 @@ def detect_api_key_type(api_key: str) -> str:
     return "unknown"
 
 
-def get_default_model(provider: str) -> str:
-    """根据提供商获取默认模型"""
-    if provider == "claude":
-        return "sonnet"
-    elif provider == "openai":
-        return "gpt-5-mini"
-    return "sonnet"
+def get_initial_model_id() -> str:
+    """为尚未发现清单的端点返回空值，交给用户手填原始模型标识。"""
+    return ""
 
 
 def initialize_session():
@@ -155,7 +151,7 @@ def initialize_session():
         st.session_state.llm_provider = detected_type if detected_type != "unknown" else "claude"
 
     if "llm_model" not in st.session_state:
-        st.session_state.llm_model = get_default_model(st.session_state.llm_provider)
+        st.session_state.llm_model = get_initial_model_id()
 
 
 def format_time(timestamp: datetime.datetime) -> str:
@@ -325,7 +321,7 @@ def stream_agent_response(user_input: str, config: Dict) -> tuple:
         "thread_id": config.get("thread_id", str(uuid.uuid4())),
         "agent_type": config.get("agent_type", "fast"),
         "llm_provider": config.get("llm_provider", "claude"),
-        "llm_model": config.get("llm_model", "sonnet"),
+        "llm_model": config.get("llm_model", ""),
     }
 
     # 发送流式请求
@@ -528,7 +524,7 @@ def render_sidebar():
                 new_type = detect_api_key_type(llm_key)
                 if new_type != "unknown":
                     st.session_state.llm_provider = new_type
-                    st.session_state.llm_model = get_default_model(new_type)
+                    st.session_state.llm_model = get_initial_model_id()
 
             # Tavily API 密钥
             tavily_key = st.text_input(
@@ -586,36 +582,14 @@ def render_sidebar():
             )
             if selected_provider != st.session_state.llm_provider:
                 st.session_state.llm_provider = selected_provider
-                st.session_state.llm_model = get_default_model(selected_provider)
+                st.session_state.llm_model = get_initial_model_id()
 
-            # 根据提供商显示对应的模型选择
-            if st.session_state.llm_provider == "claude":
-                model_options = {
-                    "haiku": "Haiku（快速且经济）",
-                    "sonnet": "Sonnet（平衡性能）",
-                    "opus": "Opus（最强性能）"
-                }
-                model_label = "Claude 模型"
-            else:  # openai
-                model_options = {
-                    "gpt-5-nano": "gpt-5-nano（快速）",
-                    "gpt-5-mini": "gpt-5-mini（平衡）",
-                    "gpt-5.1": "gpt-5.1（最强性能）"
-                }
-                model_label = "OpenAI 模型"
-
-            # 确保当前模型在选项中
-            current_model = st.session_state.llm_model
-            if current_model not in model_options:
-                current_model = list(model_options.keys())[0]
-                st.session_state.llm_model = current_model
-
-            selected_model = st.selectbox(
+            # 模型清单由后端运行时发现；旧 Streamlit 路径在发现接口接入前只允许手填。
+            model_label = f"{st.session_state.llm_provider.upper()} 模型标识"
+            selected_model = st.text_input(
                 model_label,
-                options=list(model_options.keys()),
-                format_func=lambda x: model_options[x],
-                index=list(model_options.keys()).index(current_model),
-                help=f"选择 {st.session_state.llm_provider.upper()} 模型版本"
+                value=st.session_state.llm_model,
+                help="填写端点 /v1/models 返回的原始模型标识；发现失败时不会猜测或替换。",
             )
             if selected_model != st.session_state.llm_model:
                 st.session_state.llm_model = selected_model

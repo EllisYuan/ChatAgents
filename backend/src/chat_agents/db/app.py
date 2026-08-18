@@ -142,3 +142,17 @@ class DiscoveredModel(Base):
     model_id: Mapped[str] = mapped_column(String, nullable=False)
     owned_by: Mapped[str] = mapped_column(String, nullable=False)
     discovered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class DiscoveredModelRefresh(Base):
+    """模型清单成功刷新元数据，由发现任务写入，不由业务逻辑写入。
+
+    单独保存批次时刻是为了表达“成功返回空清单”——此时没有
+    ``discovered_model`` 行可供 ``MAX(discovered_at)`` 推导。
+    """
+
+    __tablename__ = "discovered_model_refresh"
+    __table_args__: ClassVar[dict] = {"schema": APP_SCHEMA}
+
+    endpoint_profile: Mapped[str] = mapped_column(String, primary_key=True)
+    last_success_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
