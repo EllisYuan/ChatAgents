@@ -41,21 +41,19 @@ uv run --project backend pytest -m eval backend/tests/evals
 
 ## Tavily / Jina 夹具格式
 
-夹具的顶层键是数据集场景 ID，不是模型生成的查询字符串。每次 Tavily 调用按录制顺序消费一份响应；Jina 正文按 URL 读取。
+夹具的顶层键是数据集场景 ID，不是模型生成的查询字符串。同一场景下不同措辞、不同次数的 Tavily 调用都读取该场景冻结的结果集合；Jina 正文按 URL 读取。
 
 ```json
 {
   "scenarios": {
     "fresh-news": {
-      "tavily_responses": [
-        [
-          {
-            "title": "来源标题",
-            "url": "https://example.test/a",
-            "content": "搜索摘要",
-            "score": 0.9
-          }
-        ]
+      "tavily_results": [
+        {
+          "title": "来源标题",
+          "url": "https://example.test/a",
+          "content": "搜索摘要",
+          "score": 0.9
+        }
       ],
       "jina_responses": {
         "https://example.test/a": "# 正文\n\n冻结内容"
@@ -72,7 +70,7 @@ uv run --project backend pytest -m eval backend/tests/evals
 - `argument_compliance`：工具调用参数通过当次工具 JSON Schema 的比例。
 - `system_constraint_adherence`：实际迭代数对软步数预算的遵从度。
 - `tool_trigger_rate`：需要联网时触发工具、不需要联网时保持不触发的比例。
-- `trajectory_efficiency`：硬上限触达、重复读取同一 URL、搜索后未继续读取三个子信号的均值。
+- `trajectory_efficiency`：硬上限触达、重复读取同一 URL、搜索后未继续读取的比例三个子信号的均值。
 - `citation_faithfulness`：回答引用 URL 与实际工具观察 URL 的交集占回答引用的比例。
 
 判官指标：
@@ -84,4 +82,4 @@ uv run --project backend pytest -m eval backend/tests/evals
 
 ## 判官
 
-`ModelPortJudge` 复用项目现有的 `ModelPort`，不绑定特定供应商 SDK。默认判官快照是 `gpt-4.1-mini-2025-04-14`，可用 `EVAL_JUDGE_MODEL` 覆盖；release 金标准抽检的默认快照是 `claude-opus-4-5-20251101`。判官返回的快照标识必须写入每条评测结果。
+`ModelPortJudge` 复用项目现有的 `ModelPort`，不绑定特定供应商 SDK。型号不写死在代码中：常规评测由 CI secret `EVAL_JUDGE_MODEL` 注入 `gpt-4.1-mini-2025-04-14`，release 金标准抽检由 `EVAL_RELEASE_JUDGE_MODEL` 注入 `claude-opus-4-5-20251101`。判官返回的快照标识必须写入每条评测结果。

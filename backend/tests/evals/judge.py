@@ -13,16 +13,18 @@ from chat_agents.llm.message import ModelMessage, TextBlock
 from chat_agents.llm.port import ModelPort, get_model_port
 from chat_agents.llm.profile import EndpointProfile
 
-DEFAULT_JUDGE_SNAPSHOT = "gpt-4.1-mini-2025-04-14"
-RELEASE_JUDGE_SNAPSHOT = "claude-opus-4-5-20251101"
 JUDGE_MODEL_ENV = "EVAL_JUDGE_MODEL"
+RELEASE_JUDGE_MODEL_ENV = "EVAL_RELEASE_JUDGE_MODEL"
 
 
 def judge_snapshot_from_env(*, release: bool = False) -> str:
-    """返回本次请求的判官快照；环境变量优先，默认值遵循 issue #60。"""
+    """读取本次请求的判官快照；型号只由环境变量或 CI secret 注入。"""
 
-    fallback = RELEASE_JUDGE_SNAPSHOT if release else DEFAULT_JUDGE_SNAPSHOT
-    return os.environ.get(JUDGE_MODEL_ENV, fallback)
+    env_name = RELEASE_JUDGE_MODEL_ENV if release else JUDGE_MODEL_ENV
+    snapshot_id = os.environ.get(env_name)
+    if not snapshot_id:
+        raise RuntimeError(f"{env_name} 未配置")
+    return snapshot_id
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,10 +71,11 @@ class ModelPortJudge:
         *,
         profile: EndpointProfile,
         snapshot_id: str | None = None,
+        release: bool = False,
         model_port_factory: ModelPortFactory = get_model_port,
     ) -> None:
         self._profile = profile
-        self._snapshot_id = snapshot_id or judge_snapshot_from_env()
+        self._snapshot_id = snapshot_id or judge_snapshot_from_env(release=release)
         self._model_port_factory = model_port_factory
 
     async def evaluate(self, request: JudgeRequest) -> JudgeScores:

@@ -8,7 +8,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from chat_agents.agent.events import RunCompleted, RunEvent, ToolFinished, ToolStarted
+from chat_agents.agent.events import RunCompleted, RunEvent, RunFailed, ToolFinished, ToolStarted
 from chat_agents.agent.step_budget import STEP_BUDGETS
 from chat_agents.llm.message import TextBlock
 from chat_agents.tools.registry import TOOL_SPECS
@@ -48,12 +48,16 @@ class EvalTrace:
         tool_schemas: Mapping[str, dict[str, Any]] | None = None,
     ) -> EvalTrace:
         completed = [event for event in events if isinstance(event, RunCompleted)]
-        if not completed:
-            raise ValueError(f"场景 {case.scenario_id} 没有 RunCompleted，无法评分")
-        final_message = completed[-1].message
-        final_answer = "".join(
-            block.text for block in final_message.content if isinstance(block, TextBlock)
-        )
+        failed = [event for event in events if isinstance(event, RunFailed)]
+        if not completed and not failed:
+            raise ValueError(f"场景 {case.scenario_id} 没有运行终态事件，无法评分")
+        final_answer = ""
+        if completed:
+            final_answer = "".join(
+                block.text
+                for block in completed[-1].message.content
+                if isinstance(block, TextBlock)
+            )
         tool_calls = tuple(event for event in events if isinstance(event, ToolStarted))
         observations = tuple(event.result for event in events if isinstance(event, ToolFinished))
         iteration_count = max((event.iteration for event in events), default=0)
@@ -133,26 +137,30 @@ def trajectory_efficiency(trace: EvalTrace) -> MetricScore:
     ]
     repeated_reader_url_count = sum(count - 1 for count in Counter(reader_urls).values())
 
-    last_search = max(
-        (index for index, call in enumerate(trace.tool_calls) if call.name == "web_search"),
-        default=-1,
+    search_indices = [
+        index for index, call in enumerate(trace.tool_calls) if call.name == "web_search"
+    ]
+    reader_indices = [
+        index for index, call in enumerate(trace.tool_calls) if call.name == "web_reader"
+    ]
+    unread_searches = sum(
+        not any(reader_index > search_index for reader_index in reader_indices)
+        for search_index in search_indices
     )
-    last_reader = max(
-        (index for index, call in enumerate(trace.tool_calls) if call.name == "web_reader"),
-        default=-1,
+    search_without_followup_read_rate = (
+        unread_searches / len(search_indices) if search_indices else 0.0
     )
-    search_without_followup_read = last_search >= 0 and last_reader < last_search
 
     hard_cap_score = 0.0 if hard_cap_reached else 1.0
     repeated_read_score = 1.0 / (1 + repeated_reader_url_count)
-    search_read_score = 0.0 if search_without_followup_read else 1.0
+    search_read_score = 1.0 - search_without_followup_read_rate
     score = (hard_cap_score + repeated_read_score + search_read_score) / 3
     return MetricScore(
         score=score,
         details={
             "hard_cap_reached": hard_cap_reached,
             "repeated_reader_url_count": repeated_reader_url_count,
-            "search_without_followup_read": search_without_followup_read,
+            "search_without_followup_read_rate": search_without_followup_read_rate,
         },
     )
 

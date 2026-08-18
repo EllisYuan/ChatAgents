@@ -13,6 +13,7 @@ from chat_agents.agent.events import (
     IterationStarted,
     ReasoningDelta,
     RunCompleted,
+    RunFailed,
     ToolFinished,
     ToolStarted,
 )
@@ -26,7 +27,8 @@ from pydantic import SecretStr
 from .dataset import EvalCase, EvalDataset, EvalGroupKey
 from .evaluator import EvalSample, evaluate_batch
 from .judge import (
-    DEFAULT_JUDGE_SNAPSHOT,
+    JUDGE_MODEL_ENV,
+    RELEASE_JUDGE_MODEL_ENV,
     JudgeRequest,
     JudgeScores,
     ModelPortJudge,
@@ -100,15 +102,13 @@ def test_vendor_fixtures_freeze_tavily_and_jina_by_scenario_id(tmp_path: Path) -
             {
                 "scenarios": {
                     "fresh-news": {
-                        "tavily_responses": [
-                            [
-                                {
-                                    "title": "来源 A",
-                                    "url": "https://example.test/a",
-                                    "content": "搜索摘要",
-                                    "score": 0.9,
-                                }
-                            ]
+                        "tavily_results": [
+                            {
+                                "title": "来源 A",
+                                "url": "https://example.test/a",
+                                "content": "搜索摘要",
+                                "score": 0.9,
+                            }
                         ],
                         "jina_responses": {"https://example.test/a": "# 来源 A\n\n冻结的正文"},
                     }
@@ -125,9 +125,14 @@ def test_vendor_fixtures_freeze_tavily_and_jina_by_scenario_id(tmp_path: Path) -
     search_result = asyncio.run(
         specs["web_search"].handler({"query": "模型每次都可能生成不同查询", "max_results": 5}, ctx)
     )
+    reworded_result = asyncio.run(
+        specs["web_search"].handler({"query": "另一种查询表达", "max_results": 5}, ctx)
+    )
     reader_result = asyncio.run(specs["web_reader"].handler({"url": "https://example.test/a"}, ctx))
 
+    assert reworded_result.structured["results"] == search_result.structured["results"]
     assert "https://example.test/a" in search_result.model_text
+    assert "https://example.test/a" in reworded_result.model_text
     assert reader_result.model_text == "# 来源 A\n\n冻结的正文"
     assert store.opened_scenario_ids == ["fresh-news"]
 
@@ -363,10 +368,10 @@ def test_trajectory_efficiency_exposes_all_three_subsignals() -> None:
                 name="web_search",
                 arguments={"query": "最后又搜一次"},
             ),
-            RunCompleted(
+            RunFailed(
                 run_id="run",
                 iteration=hard_cap,
-                message=_answer("没有引用"),
+                reason=f"达到步数硬上限（{hard_cap}）",
             ),
         ]
     )
@@ -377,9 +382,51 @@ def test_trajectory_efficiency_exposes_all_three_subsignals() -> None:
     assert metric.details == {
         "hard_cap_reached": True,
         "repeated_reader_url_count": 1,
-        "search_without_followup_read": True,
+        "search_without_followup_read_rate": 1.0,
     }
     assert metric.score == pytest.approx(1 / 6)
+
+
+def test_search_without_read_is_measured_as_a_rate() -> None:
+    case = EvalCase(
+        scenario_id="partial-read",
+        query="搜索两次",
+        prompt_version_id="prompt-v1",
+        tool_schema_version_id="tools-v1",
+        effort="medium",
+        should_use_tools=True,
+    )
+    events = [
+        IterationStarted(run_id="run", iteration=1),
+        ToolStarted(
+            run_id="run",
+            iteration=1,
+            tool_call_id="search-1",
+            name="web_search",
+            arguments={"query": "第一次"},
+        ),
+        ToolStarted(
+            run_id="run",
+            iteration=1,
+            tool_call_id="read-1",
+            name="web_reader",
+            arguments={"url": "https://example.test/a"},
+        ),
+        ToolStarted(
+            run_id="run",
+            iteration=1,
+            tool_call_id="search-2",
+            name="web_search",
+            arguments={"query": "第二次"},
+        ),
+        RunCompleted(run_id="run", iteration=1, message=_answer("完成")),
+    ]
+
+    report = asyncio.run(evaluate_batch([EvalSample(case=case, events=events)], judge=FakeJudge()))
+    metric = report.case_results[0].scores["trajectory_efficiency"]
+
+    assert metric.details["search_without_followup_read_rate"] == 0.5
+    assert metric.score == pytest.approx(5 / 6)
 
 
 class FakeJudgeModelPort:
@@ -400,7 +447,9 @@ class FakeJudgeModelPort:
         )
 
 
-def test_model_port_judge_uses_live_model_boundary_and_returns_two_scores() -> None:
+def test_model_port_judge_uses_live_model_boundary_and_returns_two_scores(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     profile = EndpointProfile(
         name="judge",
         protocol="openai_responses",
@@ -409,9 +458,10 @@ def test_model_port_judge_uses_live_model_boundary_and_returns_two_scores() -> N
         api_key=SecretStr("test-key"),
     )
     port = FakeJudgeModelPort()
+    monkeypatch.setenv(RELEASE_JUDGE_MODEL_ENV, "judge-exact-2026-08-18")
     judge = ModelPortJudge(
         profile=profile,
-        snapshot_id="judge-exact-2026-08-18",
+        release=True,
         model_port_factory=lambda _profile: port,
     )
 
@@ -437,11 +487,17 @@ def test_model_port_judge_uses_live_model_boundary_and_returns_two_scores() -> N
     assert port.calls[0]["effort"] == "low"
 
 
-def test_judge_default_snapshot_comes_from_environment_with_documented_default(
+def test_judge_snapshot_must_be_injected_by_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("EVAL_JUDGE_MODEL", raising=False)
-    assert judge_snapshot_from_env() == DEFAULT_JUDGE_SNAPSHOT
+    monkeypatch.delenv(JUDGE_MODEL_ENV, raising=False)
+    monkeypatch.delenv(RELEASE_JUDGE_MODEL_ENV, raising=False)
+    with pytest.raises(RuntimeError, match=JUDGE_MODEL_ENV):
+        judge_snapshot_from_env()
+    with pytest.raises(RuntimeError, match=RELEASE_JUDGE_MODEL_ENV):
+        judge_snapshot_from_env(release=True)
 
-    monkeypatch.setenv("EVAL_JUDGE_MODEL", "custom-snapshot-2026-08-18")
-    assert judge_snapshot_from_env() == "custom-snapshot-2026-08-18"
+    monkeypatch.setenv(JUDGE_MODEL_ENV, "judge-snapshot-2026-08-18")
+    monkeypatch.setenv(RELEASE_JUDGE_MODEL_ENV, "release-snapshot-2026-08-18")
+    assert judge_snapshot_from_env() == "judge-snapshot-2026-08-18"
+    assert judge_snapshot_from_env(release=True) == "release-snapshot-2026-08-18"

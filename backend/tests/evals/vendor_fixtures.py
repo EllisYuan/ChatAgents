@@ -16,7 +16,7 @@ from chat_agents.tools.web_search.orchestration import SearchHit
 @dataclass(frozen=True, slots=True)
 class FrozenVendorFixture:
     scenario_id: str
-    tavily_responses: tuple[tuple[SearchHit, ...], ...]
+    tavily_results: tuple[SearchHit, ...]
     jina_responses: dict[str, str]
 
 
@@ -25,20 +25,12 @@ class _FrozenVendorSession:
 
     def __init__(self, fixture: FrozenVendorFixture) -> None:
         self._fixture = fixture
-        self._search_index = 0
         self.search_queries: list[str] = []
         self.read_urls: list[str] = []
 
     async def search(self, query: str, *, max_results: int) -> list[SearchHit]:
         self.search_queries.append(query)
-        if self._search_index >= len(self._fixture.tavily_responses):
-            raise RuntimeError(
-                f"场景 {self._fixture.scenario_id} 的 Tavily 夹具不足："
-                f"第 {self._search_index + 1} 次搜索没有录制响应"
-            )
-        response = self._fixture.tavily_responses[self._search_index]
-        self._search_index += 1
-        return list(response[:max_results])
+        return list(self._fixture.tavily_results[:max_results])
 
     async def fetch(self, url: str) -> str:
         self.read_urls.append(url)
@@ -92,14 +84,10 @@ def _fixture_from_dict(scenario_id: Any, raw: Any) -> FrozenVendorFixture:
     if not isinstance(raw, dict):
         raise ValueError(f"场景 {scenario_id} 的夹具必须是对象")
 
-    raw_searches = raw.get("tavily_responses")
-    if not isinstance(raw_searches, list):
-        raise ValueError(f"场景 {scenario_id} 必须包含 tavily_responses 数组")
-    searches: list[tuple[SearchHit, ...]] = []
-    for response in raw_searches:
-        if not isinstance(response, list):
-            raise ValueError(f"场景 {scenario_id} 的每份 Tavily 响应必须是数组")
-        searches.append(tuple(_search_hit(scenario_id, item) for item in response))
+    raw_results = raw.get("tavily_results")
+    if not isinstance(raw_results, list):
+        raise ValueError(f"场景 {scenario_id} 必须包含 tavily_results 数组")
+    results = tuple(_search_hit(scenario_id, item) for item in raw_results)
 
     raw_pages = raw.get("jina_responses")
     if not isinstance(raw_pages, dict) or not all(
@@ -109,7 +97,7 @@ def _fixture_from_dict(scenario_id: Any, raw: Any) -> FrozenVendorFixture:
 
     return FrozenVendorFixture(
         scenario_id=scenario_id,
-        tavily_responses=tuple(searches),
+        tavily_results=results,
         jina_responses=dict(raw_pages),
     )
 
