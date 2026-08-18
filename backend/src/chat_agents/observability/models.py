@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, PrivateAttr, model_serializer
+from pydantic import BaseModel, ConfigDict, PrivateAttr
 
 from ..llm.events import UsageState
 
@@ -61,16 +61,6 @@ class SpanView(BaseModel):
 
     _protocol: str | None = PrivateAttr(default=None)
 
-    @model_serializer(mode="wrap")
-    def _serialize(self, handler: Any) -> dict[str, Any]:
-        data = handler(self)
-        if self._protocol == "openai_chat_completions":
-            # Chat Completions 从不采集 reasoning；字段缺席本身就是契约信息。
-            data.pop("reasoning_tokens", None)
-        if self.display_summary is None:
-            data.pop("display_summary", None)
-        return data
-
 
 class RunDetail(BaseModel):
     """单次运行的运行级配置、用量汇总与完整跨度树。"""
@@ -89,3 +79,24 @@ class RunDetail(BaseModel):
     pruned_run_count: int
     usage: list[UsageAggregate]
     spans: list[SpanView]
+
+
+def _span_payload(span: SpanView) -> dict[str, Any]:
+    """编码跨度并按协议删除结构性不存在的字段。"""
+
+    payload = span.model_dump(mode="json")
+    payload["children"] = [_span_payload(child) for child in span.children]
+    if span._protocol == "openai_chat_completions":
+        # Chat Completions 从不采集 reasoning；字段缺席本身就是契约信息。
+        payload.pop("reasoning_tokens", None)
+    if span.display_summary is None:
+        payload.pop("display_summary", None)
+    return payload
+
+
+def run_detail_payload(detail: RunDetail) -> dict[str, Any]:
+    """返回可直接交给 JSONResponse 的详情载荷。"""
+
+    payload = detail.model_dump(mode="json", exclude={"spans"})
+    payload["spans"] = [_span_payload(span) for span in detail.spans]
+    return payload

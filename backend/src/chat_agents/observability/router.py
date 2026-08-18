@@ -6,10 +6,11 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
-from .models import RunDetail, RunSummary
+from .models import RunDetail, RunSummary, run_detail_payload
 from .repository import ObservabilityRepository
 
 router = APIRouter(prefix="/api", tags=["observability"])
@@ -24,10 +25,10 @@ async def list_session_runs(session_id: UUID, session: Db) -> list[RunSummary]:
 
 
 @router.get("/runs/{run_id}", response_model=RunDetail)
-async def get_run(run_id: UUID, session: Db) -> RunDetail:
+async def get_run(run_id: UUID, session: Db) -> RunDetail | JSONResponse:
     """返回一条运行的配置、聚合用量和完整跨度树。"""
 
     detail = await ObservabilityRepository(session).get_run_detail(run_id)
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
-    return detail
+    return JSONResponse(content=run_detail_payload(detail))
