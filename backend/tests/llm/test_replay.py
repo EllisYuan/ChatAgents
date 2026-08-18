@@ -19,10 +19,11 @@ from chat_agents.llm.replay import (
     canonical_json_bytes,
     deterministic_run_id,
 )
-from pydantic import SecretStr
 
 
 def _profile() -> EndpointProfile:
+    from pydantic import SecretStr
+
     return EndpointProfile(
         name="test",
         protocol="anthropic_messages",
