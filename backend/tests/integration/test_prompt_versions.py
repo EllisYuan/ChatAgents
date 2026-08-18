@@ -9,8 +9,8 @@ from chat_agents.agent.versioning import (
     sync_model_input_versions,
 )
 from chat_agents.db.app import PromptVersion, ToolSchemaVersion
+from db_helpers import migrated_engine, session_factory_for
 from sqlalchemy import func, select
-from tests.db_helpers import migrated_engine, session_factory_for
 
 
 @pytest.mark.db
