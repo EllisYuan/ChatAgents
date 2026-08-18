@@ -15,12 +15,7 @@ from ..db.app import Message as MessageRow
 from ..db.app import Session as SessionRow
 from ..exceptions import ProtocolError
 from ..llm.message import ModelMessage, TextBlock, ToolCallBlock, ToolResultBlock
-from .masking import (
-    MASKED_OBSERVATION_IDS_KEY,
-    RETENTION_WINDOW,
-    MaskedObservation,
-    mask_tool_observations,
-)
+from .masking import RETENTION_WINDOW, MaskedObservation, MaskingProjection, mask_tool_observations
 from .models import (
     SessionDetail,
     SessionSummary,
@@ -89,12 +84,13 @@ class ModelInputProjection:
 
     @property
     def attributes(self) -> dict[str, Any]:
-        return {
-            MASKED_OBSERVATION_IDS_KEY: [
-                observation.tool_call_id for observation in self.masked_observations
-            ],
-            "pruned_runs": list(self.pruned_run_ids),
-        }
+        attributes = MaskingProjection(
+            messages=self.messages,
+            masked_observations=self.masked_observations,
+        ).attributes
+        attributes["pruned_runs"] = list(self.pruned_run_ids)
+        attributes["retention_window"] = self.retention_window
+        return attributes
 
 
 def _title_from_message(text: str) -> str:
@@ -158,6 +154,9 @@ def _project_messages_unmasked(
     while index < len(ordered):
         row = ordered[index]
         if row.role == "system":
+            index += 1
+            continue
+        if row.role == "tool" and (not projected or not _tool_calls(projected[-1])):
             index += 1
             continue
         current = row_to_model_message(
@@ -384,6 +383,14 @@ class ConversationService:
             skipped_seq_ranges=skipped_seq_ranges,
             retention_window=retention_window,
         )
+
+    async def rebuild_model_input_with_metadata(
+        self, session_id: UUID, **projection_kwargs: Any
+    ) -> ModelInputProjection:
+        """重建模型输入并保留掩蔽/削减事实，供 observability 层记录。"""
+
+        rows = await self.repository.list_messages(session_id)
+        return project_messages_with_metadata(rows, **projection_kwargs)
 
     async def clear_round_trip_payload(
         self, *, session_id: UUID, message_ids: Collection[UUID]

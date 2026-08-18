@@ -152,11 +152,14 @@ def _event_from_dict(raw: Mapping[str, Any]) -> ModelEvent:
     if kind == "reasoning_delta":
         return ReasoningDelta(text=str(raw.get("text", "")))
     if kind == "tool_call_started":
-        return ToolCallStarted(id=str(raw["id"]), name=str(raw["name"]))
+        return ToolCallStarted(id=str(_required(raw, "id")), name=str(_required(raw, "name")))
     if kind == "tool_call_args_delta":
-        return ToolCallArgsDelta(id=str(raw["id"]), args_delta=str(raw["args_delta"]))
+        return ToolCallArgsDelta(
+            id=str(_required(raw, "id")),
+            args_delta=str(_required(raw, "args_delta")),
+        )
     if kind == "tool_call_completed":
-        return ToolCallCompleted(id=str(raw["id"]))
+        return ToolCallCompleted(id=str(_required(raw, "id")))
     if kind == "model_call_completed":
         usage_raw = raw.get("usage")
         if not isinstance(usage_raw, Mapping):
@@ -166,11 +169,17 @@ def _event_from_dict(raw: Mapping[str, Any]) -> ModelEvent:
             raise ReplayError(f"录制物包含未知 usage state: {state!r}")
         if "input_tokens" not in usage_raw:
             raise ReplayError("录制物的 usage 缺少 input_tokens")
+        input_tokens = _optional_int(usage_raw.get("input_tokens"))
+        if state == "complete" and input_tokens is None:
+            raise ReplayError("complete usage 的 input_tokens 不能为 null")
+        message_raw = _required(raw, "message")
+        if not isinstance(message_raw, Mapping):
+            raise ReplayError("ModelCallCompleted 的 message 必须是对象")
         return ModelCallCompleted(
-            message=_message_from_dict(cast(Mapping[str, Any], raw["message"])),
+            message=_message_from_dict(message_raw),
             usage=Usage(
                 state=cast(Any, state),
-                input_tokens=_optional_int(usage_raw.get("input_tokens")),
+                input_tokens=input_tokens,
                 output_tokens=_optional_int(usage_raw.get("output_tokens")),
                 reasoning_tokens=_optional_int(usage_raw.get("reasoning_tokens")),
             ),
@@ -185,6 +194,12 @@ def _optional_int(value: Any) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int):
         raise ReplayError(f"usage token 必须是整数或 null: {value!r}")
     return value
+
+
+def _required(raw: Mapping[str, Any], key: str) -> Any:
+    if key not in raw:
+        raise ReplayError(f"录制物缺少字段: {key}")
+    return raw[key]
 
 
 def _request_dict(
@@ -256,13 +271,14 @@ class _RecordedTurn:
         request = raw.get("request")
         if not isinstance(request, Mapping):
             raise ReplayError("录制 turn 缺少 request")
+        events: list[ModelEvent] = []
+        for event in events_raw:
+            if not isinstance(event, Mapping):
+                raise ReplayError("录制 turn 的 event 必须是对象")
+            events.append(_event_from_dict(event))
         return cls(
             request=dict(request),
-            events=tuple(
-                _event_from_dict(cast(Mapping[str, Any], event))
-                for event in events_raw
-                if isinstance(event, Mapping)
-            ),
+            events=tuple(events),
             error=str(raw["error"]) if raw.get("error") is not None else None,
         )
 
@@ -292,6 +308,7 @@ class RecordingModelPort:
         )
         events: list[ModelEvent] = []
         error: str | None = None
+        completed = False
         try:
             async for event in self._delegate.stream(
                 messages=messages,
@@ -301,11 +318,14 @@ class RecordingModelPort:
                 profile=profile,
             ):
                 events.append(event)
+                completed = completed or isinstance(event, ModelCallCompleted)
                 yield event
-        except Exception as exc:
-            error = str(exc)
+        except BaseException as exc:
+            error = str(exc) or exc.__class__.__name__
             raise
         finally:
+            if error is None and not completed:
+                error = "模型流未产出终态事件"
             self._turns.append(_RecordedTurn(request=request, events=tuple(events), error=error))
 
     def to_dict(self) -> dict[str, Any]:
@@ -339,11 +359,12 @@ class ReplayModelPort:
         turns_raw = raw.get("turns")
         if not isinstance(turns_raw, list):
             raise ReplayError("录制物的 turns 必须是数组")
-        return cls(
-            _RecordedTurn.from_dict(cast(Mapping[str, Any], turn))
-            for turn in turns_raw
-            if isinstance(turn, Mapping)
-        )
+        turns: list[_RecordedTurn] = []
+        for turn in turns_raw:
+            if not isinstance(turn, Mapping):
+                raise ReplayError("录制物的 turn 必须是对象")
+            turns.append(_RecordedTurn.from_dict(turn))
+        return cls(turns)
 
     @classmethod
     def load(cls, path: str | Path) -> ReplayModelPort:
@@ -361,12 +382,12 @@ class ReplayModelPort:
         if self._next_turn >= len(self._turns):
             raise ReplayError("回放录制物已耗尽")
         expected = self._turns[self._next_turn]
-        self._next_turn += 1
         actual_request = _request_dict(
             messages=messages, tools=tools, model=model, effort=effort, profile=profile
         )
         if canonical_json_bytes(actual_request) != canonical_json_bytes(expected.request):
             raise ReplayError("回放输入不匹配")
+        self._next_turn += 1
         for event in expected.events:
             yield event
         if expected.error is not None:

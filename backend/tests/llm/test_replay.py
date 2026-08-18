@@ -98,7 +98,11 @@ def test_recording_round_trip_preserves_events_and_input_tokens(tmp_path: Path) 
     assert raw["turns"][0]["events"][-1]["usage"]["input_tokens"] == 123
 
     replay = ReplayModelPort.load(path)
-    assert _run(replay) == list(_events("answer", 123))
+    replayed = _run(replay)
+    assert replayed == list(_events("answer", 123))
+    completed = replayed[-1]
+    assert isinstance(completed, ModelCallCompleted)
+    assert completed.usage.reasoning_tokens == 2
 
 
 def test_same_recording_has_byte_identical_canonical_output(tmp_path: Path) -> None:
@@ -168,3 +172,25 @@ def test_replay_port_drives_runner_with_identical_fixed_run_id() -> None:
     replay_events = asyncio.run(collect(AgentRunner(model_port_factory=lambda _profile: replay)))
 
     assert replay_events == source_events
+
+
+def test_replay_rejects_malformed_turn_and_keeps_cursor_on_input_mismatch() -> None:
+    recording = RecordingModelPort(ScriptedPort([_events("answer", 123)]))
+    _run(recording)
+    raw = json.loads(recording.to_bytes())
+    raw["turns"] = [None]
+    try:
+        ReplayModelPort.from_bytes(canonical_json_bytes(raw))
+    except ValueError as exc:
+        assert "turn" in str(exc)
+    else:
+        raise AssertionError("非对象 turn 必须被拒绝")
+
+    replay = ReplayModelPort.from_bytes(recording.to_bytes())
+    try:
+        _run(replay, text="wrong")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("错误输入必须失败")
+    assert _run(replay, text="hello") == list(_events("answer", 123))

@@ -64,7 +64,10 @@ class MaskingProjection:
         return {
             MASKED_OBSERVATION_IDS_KEY: [
                 observation.tool_call_id for observation in self.masked_observations
-            ]
+            ],
+            "masked_observations": [
+                observation.as_dict() for observation in self.masked_observations
+            ],
         }
 
 
