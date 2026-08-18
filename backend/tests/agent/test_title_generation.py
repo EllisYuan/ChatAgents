@@ -107,3 +107,59 @@ def test_first_run_generates_title_with_auxiliary_model() -> None:
         ModelMessage(role="user", content=(TextBlock(text="请介绍 Python"),))
     ]
     assert title_call["system_prompt"]
+
+
+def test_auxiliary_failure_falls_back_without_failing_main_run() -> None:
+    class _FailingAuxiliaryPort(_ParallelPort):
+        async def stream(
+            self,
+            *,
+            messages: Any,
+            tools: Any,
+            model: str,
+            effort: EffortTier,
+            profile: EndpointProfile,
+            system_prompt: str | None = None,
+        ) -> AsyncIterator[ModelEvent]:
+            if model == "aux-model":
+                raise RuntimeError("标题上游不可用")
+                yield  # pragma: no cover
+            async for event in super().stream(
+                messages=messages,
+                tools=tools,
+                model=model,
+                effort=effort,
+                profile=profile,
+                system_prompt=system_prompt,
+            ):
+                yield event
+
+    port = _FailingAuxiliaryPort()
+    runner = AgentRunner(tool_executor=ToolExecutor({}), model_port_factory=lambda _p: port)
+
+    async def collect() -> list[Any]:
+        return [
+            event
+            async for event in runner.run(
+                [
+                    ModelMessage(
+                        role="user",
+                        content=(TextBlock(text="这是一个非常长的首条用户消息，用于验证回落标题"),),
+                    )
+                ],
+                profile=_profile(),
+                main_model="main-model",
+                auxiliary_model="aux-model",
+                effort="low",
+                http_client=object(),
+                run_id="run-failure",
+                session_id=uuid4(),
+                generate_title=True,
+            )
+        ]
+
+    events = asyncio.run(collect())
+    generated = next(event for event in events if isinstance(event, TitleGenerated))
+    assert generated.error == "标题上游不可用"
+    assert generated.title == "这是一个非常长的首条用户消息，用于验证回落标题"
+    assert not any(type(event).__name__ == "RunFailed" for event in events)

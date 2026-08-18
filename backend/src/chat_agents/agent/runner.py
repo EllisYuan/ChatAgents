@@ -48,6 +48,7 @@ from .tool_executor import ToolCallFinished, ToolCallStarted, ToolExecutor, Tool
 
 ModelPortFactory = Callable[[EndpointProfile], ModelPort]
 _TITLE_LIMIT = 30
+_TITLE_TIMEOUT_SECONDS = 5.0
 
 
 def _fallback_title(text: str) -> str:
@@ -182,6 +183,27 @@ class AgentRunner:
                 )
             )
             yield TitleGenerationStarted(run_id=run_id, model=auxiliary_model)
+
+        async def await_title() -> TitleGenerated:
+            """在有限时间内收束 auxiliary，避免拖住主运行终态。"""
+
+            assert title_task is not None
+            assert session_id is not None
+            assert first_user_text is not None
+            try:
+                return await asyncio.wait_for(
+                    asyncio.shield(title_task), timeout=_TITLE_TIMEOUT_SECONDS
+                )
+            except TimeoutError:
+                title_task.cancel()
+                await asyncio.gather(title_task, return_exceptions=True)
+                return TitleGenerated(
+                    run_id=run_id,
+                    session_id=session_id,
+                    title=_fallback_title(first_user_text),
+                    error="标题模型调用超时",
+                )
+
         tool_defs = self._tool_executor.tool_definitions()
         hard_cap = STEP_BUDGETS[effort].hard_cap
         ctx = RunToolContext(run_id=run_id, http_client=http_client)
@@ -227,14 +249,14 @@ class AgentRunner:
                 # 上游错误原样透传（ADR-0015）——这里只做「运行失败」的事件化，
                 # 不分类、不吞掉，reason 就是异常本身的文本。
                 if title_task is not None and not title_emitted:
-                    yield await title_task
+                    yield await await_title()
                     title_emitted = True
                 yield RunFailed(run_id=run_id, iteration=iteration, reason=str(exc))
                 return
 
             if final_message is None or final_usage is None:
                 if title_task is not None and not title_emitted:
-                    yield await title_task
+                    yield await await_title()
                     title_emitted = True
                 yield RunFailed(run_id=run_id, iteration=iteration, reason="模型调用未产出终态事件")
                 return
@@ -253,7 +275,7 @@ class AgentRunner:
             ]
             if not tool_calls:
                 if title_task is not None and not title_emitted:
-                    yield await title_task
+                    yield await await_title()
                     title_emitted = True
                 yield RunCompleted(run_id=run_id, iteration=iteration, message=final_message)
                 return
@@ -262,7 +284,7 @@ class AgentRunner:
                 # 这一轮的工具结果永远等不到下一次模型调用去读——执行它们纯属浪费，
                 # 直接如实失败（CONTEXT.md「硬上限」：越限时截到上限，不静默截断）。
                 if title_task is not None and not title_emitted:
-                    yield await title_task
+                    yield await await_title()
                     title_emitted = True
                 yield RunFailed(
                     run_id=run_id,
@@ -296,6 +318,9 @@ class AgentRunner:
                             result=tool_event.result,
                         )
             except ToolProgramError as exc:
+                if title_task is not None and not title_emitted:
+                    yield await await_title()
+                    title_emitted = True
                 yield RunFailed(run_id=run_id, iteration=iteration, reason=str(exc))
                 return
 
