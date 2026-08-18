@@ -12,7 +12,14 @@ from collections.abc import AsyncIterator
 from typing import Any
 from uuid import UUID
 
-from ..agent.events import IterationCompleted, RunEvent, ToolFinished, ToolStarted, tool_message_id
+from ..agent.events import (
+    IterationCompleted,
+    RunEvent,
+    TitleGenerated,
+    ToolFinished,
+    ToolStarted,
+    tool_message_id,
+)
 from ..agent.events import assistant_message_id as _assistant_message_id
 from ..llm.message import ModelMessage, ToolResultBlock
 from .service import ConversationService
@@ -35,11 +42,21 @@ async def _append_message_in_short_transaction(
         )
 
 
+async def _set_generated_title_in_short_transaction(
+    *, session_factory: Any, session_id: UUID, expected_title: str | None, title: str
+) -> None:
+    async with session_factory() as session, session.begin():
+        service = ConversationService(session)
+        await service.set_generated_title(session_id, expected_title=expected_title, title=title)
+
+
 async def persist(
     events: AsyncIterator[RunEvent],
     *,
     session_id: UUID,
     session_factory: Any,
+    expected_title: str | None = None,
+    round_trip_message_ids: set[UUID] | None = None,
 ) -> AsyncIterator[RunEvent]:
     """透传每个 ``RunEvent``，旁路把消息增量写进 ``app.message``。"""
 
@@ -47,13 +64,24 @@ async def persist(
     tool_results: dict[str, str] = {}
 
     async for event in events:
-        if isinstance(event, IterationCompleted):
+        if isinstance(event, TitleGenerated):
+            await _set_generated_title_in_short_transaction(
+                session_factory=session_factory,
+                session_id=session_id,
+                expected_title=expected_title,
+                title=event.title,
+            )
+
+        elif isinstance(event, IterationCompleted):
+            message_id = _assistant_message_id(event.run_id, event.iteration)
             await _append_message_in_short_transaction(
                 session_factory=session_factory,
                 session_id=session_id,
-                message_id=_assistant_message_id(event.run_id, event.iteration),
+                message_id=message_id,
                 message=event.message,
             )
+            if round_trip_message_ids is not None:
+                round_trip_message_ids.add(message_id)
             tool_call_order = []
             tool_results = {}
 
@@ -70,12 +98,15 @@ async def persist(
                         for call_id in tool_call_order
                     ),
                 )
+                message_id = tool_message_id(event.run_id, event.iteration)
                 await _append_message_in_short_transaction(
                     session_factory=session_factory,
                     session_id=session_id,
-                    message_id=tool_message_id(event.run_id, event.iteration),
+                    message_id=message_id,
                     message=message,
                 )
+                if round_trip_message_ids is not None:
+                    round_trip_message_ids.add(message_id)
                 tool_call_order = []
                 tool_results = {}
 

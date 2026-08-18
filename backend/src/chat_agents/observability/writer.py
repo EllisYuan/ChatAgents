@@ -42,6 +42,8 @@ class RunWriter:
         effort: str | None,
         prompt_version_id: str | None,
         tool_schema_version_id: str | None,
+        retention_window: int | None = None,
+        attributes: dict[str, Any] | None = None,
     ) -> None:
         async def body(session: Any) -> None:
             session.add(
@@ -53,6 +55,8 @@ class RunWriter:
                     effort=effort,
                     prompt_version_id=prompt_version_id,
                     tool_schema_version_id=tool_schema_version_id,
+                    retention_window=retention_window,
+                    attributes=attributes or {},
                 )
             )
 
@@ -68,6 +72,7 @@ class RunWriter:
         kind: str,
         role: str | None,
         model: str | None,
+        attributes: dict[str, Any] | None = None,
     ) -> None:
         async def body(session: Any) -> None:
             session.add(
@@ -79,6 +84,7 @@ class RunWriter:
                     kind=kind,
                     role=role,
                     model=model,
+                    attributes=attributes or {},
                 )
             )
 
@@ -94,20 +100,20 @@ class RunWriter:
         input_tokens: int | None,
         output_tokens: int | None,
         reasoning_tokens: int | None,
+        attributes: dict[str, Any] | None = None,
     ) -> None:
         async def body(session: Any) -> None:
-            await session.execute(
-                update(Span)
-                .where(Span.id == span_id)
-                .values(
-                    status=status,
-                    usage_status=usage_status,
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                    reasoning_tokens=reasoning_tokens,
-                    ended_at=func.now(),
-                )
-            )
+            values: dict[str, Any] = {
+                "status": status,
+                "usage_status": usage_status,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "reasoning_tokens": reasoning_tokens,
+                "ended_at": func.now(),
+            }
+            if attributes is not None:
+                values["attributes"] = attributes
+            await session.execute(update(Span).where(Span.id == span_id).values(**values))
 
         await _guarded(self._session_factory, op="close_span", run_id=run_id, body=body)
 

@@ -15,15 +15,26 @@ from uuid import UUID
 from ..agent.events import (
     IterationCompleted,
     IterationStarted,
+    ReasoningDelta,
     RunCompleted,
     RunEvent,
     RunFailed,
+    TitleGenerated,
+    TitleGenerationStarted,
     llm_span_id,
+    title_span_id,
 )
+from .reasoning import reasoning_attributes
 from .writer import RunWriter
 
 
-async def _close_partial_span(writer: RunWriter, *, span_id: UUID, run_id: str) -> None:
+async def _close_partial_span(
+    writer: RunWriter,
+    *,
+    span_id: UUID,
+    run_id: str,
+    attributes: dict[str, Any] | None = None,
+) -> None:
     """把一个还没等到 ``IterationCompleted`` 就中断的跨度标记为部分用量。
 
     ``RunFailed`` 与断连收尾（``finally``）共用这条——两者都是「没等到正常的
@@ -38,6 +49,7 @@ async def _close_partial_span(writer: RunWriter, *, span_id: UUID, run_id: str) 
         input_tokens=None,
         output_tokens=None,
         reasoning_tokens=None,
+        attributes=attributes,
     )
 
 
@@ -49,14 +61,32 @@ async def observe(
     effort: str | None,
     role: Literal["main"] = "main",
     model: str,
+    protocol: str | None = None,
+    retention_window: int | None = None,
+    run_attributes: dict[str, Any] | None = None,
     session_factory: Any,
+    expect_title: bool = False,
 ) -> AsyncIterator[RunEvent]:
-    """透传每个 ``RunEvent``，旁路把运行/跨度增量写进 ``obs``。"""
+    """透传事件，并记录主模型与 auxiliary 标题的兄弟跨度。"""
 
     writer = RunWriter(session_factory=session_factory)
     run_id: str | None = None
-    span_open: UUID | None = None
+    main_span_open: UUID | None = None
+    title_span_open: UUID | None = None
+    main_terminal = False
+    main_status: Literal["completed", "failed"] = "completed"
+    title_terminal = not expect_title
     terminal = False
+    main_attributes: dict[str, Any] = {"protocol": protocol} if protocol is not None else {}
+    title_attributes: dict[str, Any] = {"protocol": protocol} if protocol is not None else {}
+    main_reasoning: list[str] = []
+    title_reasoning: list[str] = []
+
+    async def finish_if_ready() -> None:
+        nonlocal terminal
+        if run_id is not None and main_terminal and title_terminal and not terminal:
+            await writer.finish_run(run_id=run_id, status=main_status)
+            terminal = True
 
     try:
         async for event in events:
@@ -75,21 +105,47 @@ async def observe(
                         if isinstance(event, IterationStarted)
                         else None
                     ),
+                    retention_window=retention_window,
+                    attributes=run_attributes,
                 )
 
-            if isinstance(event, IterationStarted):
-                span_open = llm_span_id(run_id, event.iteration)
+            if isinstance(event, TitleGenerationStarted):
+                title_terminal = False
+                title_reasoning.clear()
+                title_span_open = title_span_id(run_id)
                 await writer.open_span(
-                    span_id=span_open,
+                    span_id=title_span_open,
+                    run_id=run_id,
+                    parent_span_id=None,
+                    name="title_generation",
+                    kind="llm",
+                    role="auxiliary",
+                    model=event.model,
+                    attributes=title_attributes,
+                )
+
+            elif isinstance(event, IterationStarted):
+                main_reasoning.clear()
+                main_span_open = llm_span_id(run_id, event.iteration)
+                await writer.open_span(
+                    span_id=main_span_open,
                     run_id=run_id,
                     parent_span_id=None,
                     name="model_call",
                     kind="llm",
                     role=role,
                     model=model,
+                    attributes=main_attributes,
                 )
 
+            elif isinstance(event, ReasoningDelta):
+                main_reasoning.append(event.text)
+
             elif isinstance(event, IterationCompleted):
+                attributes = dict(main_attributes)
+                summary = reasoning_attributes("".join(main_reasoning))
+                if summary is not None:
+                    attributes.update(summary)
                 await writer.close_span(
                     span_id=llm_span_id(run_id, event.iteration),
                     run_id=run_id,
@@ -98,36 +154,61 @@ async def observe(
                     input_tokens=event.usage.input_tokens,
                     output_tokens=event.usage.output_tokens,
                     reasoning_tokens=event.usage.reasoning_tokens,
+                    attributes=attributes,
                 )
-                span_open = None
+                main_span_open = None
+
+            elif isinstance(event, TitleGenerated):
+                title_terminal = True
+                if title_span_open is not None:
+                    usage = event.usage
+                    attributes = dict(title_attributes)
+                    summary = reasoning_attributes("".join(title_reasoning))
+                    if summary is not None:
+                        attributes.update(summary)
+                    await writer.close_span(
+                        span_id=title_span_open,
+                        run_id=run_id,
+                        status="error" if event.error is not None else "ok",
+                        usage_status=usage.state if usage is not None else "unavailable",
+                        input_tokens=usage.input_tokens if usage is not None else None,
+                        output_tokens=usage.output_tokens if usage is not None else None,
+                        reasoning_tokens=usage.reasoning_tokens if usage is not None else None,
+                        attributes=attributes,
+                    )
+                    title_span_open = None
+                await finish_if_ready()
 
             elif isinstance(event, RunCompleted):
-                terminal = True
-                await writer.finish_run(run_id=run_id, status="completed")
+                main_terminal = True
+                main_status = "completed"
+                await finish_if_ready()
 
             elif isinstance(event, RunFailed):
-                terminal = True
-                if span_open is not None:
-                    await _close_partial_span(writer, span_id=span_open, run_id=run_id)
-                    span_open = None
-                await writer.finish_run(run_id=run_id, status="failed")
+                main_terminal = True
+                main_status = "failed"
+                if main_span_open is not None:
+                    await _close_partial_span(writer, span_id=main_span_open, run_id=run_id)
+                    main_span_open = None
+                if title_terminal:
+                    await writer.finish_run(run_id=run_id, status="failed")
+                    terminal = True
 
             yield event
     except Exception:
-        # 往上游冒出的真实异常（比如 persist 的落库失败）——不是断连，是失败；
-        # 标完 obs 再原样重新抛出，交给 encode_sse 收敛成 RUN_ERROR（ADR-0008）。
-        # `except Exception` 接不住 `GeneratorExit`/`CancelledError`（两者都是
-        # `BaseException`），断连因此只会落进下面的 `finally`，两条路径不会混。
+        # 上游真实异常先标 failed，再原样交给 transport 收敛成 RUN_ERROR。
         if run_id is not None and not terminal:
-            if span_open is not None:
-                await _close_partial_span(writer, span_id=span_open, run_id=run_id)
+            if main_span_open is not None:
+                await _close_partial_span(writer, span_id=main_span_open, run_id=run_id)
+            if title_span_open is not None:
+                await _close_partial_span(writer, span_id=title_span_open, run_id=run_id)
             await writer.finish_run(run_id=run_id, status="failed")
             terminal = True
         raise
     finally:
         if run_id is not None and not terminal:
-            # 走到这里且未标记终态，只可能是客户端断连（生成器被取消）——
-            # 这里是唯一的收尾机会（就地停，ADR-0008）。
-            if span_open is not None:
-                await _close_partial_span(writer, span_id=span_open, run_id=run_id)
+            if main_span_open is not None:
+                await _close_partial_span(writer, span_id=main_span_open, run_id=run_id)
+            if title_span_open is not None:
+                await _close_partial_span(writer, span_id=title_span_open, run_id=run_id)
             await writer.finish_run(run_id=run_id, status="aborted")

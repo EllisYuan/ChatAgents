@@ -1,4 +1,4 @@
-# uv-managed image for the existing demo entrypoints.
+# uv-managed image for the FastAPI backend and the remaining demo entrypoints.
 FROM ghcr.io/astral-sh/uv:0.9.4 AS uv
 FROM python:3.11-slim AS base
 
@@ -17,4 +17,4 @@ ENV PATH="/app/backend/.venv/bin:$PATH"
 
 EXPOSE 8080 8501
 
-CMD ["python", "app.py"]
+CMD ["uvicorn", "chat_agents.main:app", "--host", "0.0.0.0", "--port", "8080"]

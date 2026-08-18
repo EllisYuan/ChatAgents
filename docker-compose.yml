@@ -44,7 +44,7 @@ services:
       - GROQ_API_KEY=${GROQ_API_KEY}
       - DATABASE_URL=postgresql+psycopg://postgres:postgres@postgres:5432/chat_agents
       - PORT=8080
-    command: python app.py
+    command: ["uvicorn", "chat_agents.main:app", "--host", "0.0.0.0", "--port", "8080"]
     depends_on:
       migrate:
         condition: service_completed_successfully

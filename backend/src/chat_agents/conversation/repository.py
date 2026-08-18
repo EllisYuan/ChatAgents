@@ -43,6 +43,15 @@ class ConversationRepository:
         row: Session | None = result.scalar_one_or_none()
         return row
 
+    async def get_session_for_update(self, session_id: UUID) -> Session | None:
+        result = await self.session.execute(
+            select(Session)
+            .where(Session.id == session_id, Session.deleted_at.is_(None))
+            .with_for_update()
+        )
+        row: Session | None = result.scalar_one_or_none()
+        return row
+
     async def list_sessions(
         self,
         *,
@@ -99,6 +108,32 @@ class ConversationRepository:
         row.title = title
         await self.session.flush()
         return row
+
+    async def set_title_if_missing(self, session_id: UUID, title: str) -> bool:
+        """仅在标题仍为空时写入，保护人工改名与并发首轮结果。"""
+
+        result = await self.session.execute(
+            update(Session)
+            .where(Session.id == session_id, Session.deleted_at.is_(None), Session.title.is_(None))
+            .values(title=title)
+        )
+        return getattr(result, "rowcount", 0) == 1
+
+    async def replace_title_if_current(
+        self, session_id: UUID, *, expected_title: str, title: str
+    ) -> bool:
+        """仅替换本次首轮 claim 的 fallback，不覆盖人工改名。"""
+
+        result = await self.session.execute(
+            update(Session)
+            .where(
+                Session.id == session_id,
+                Session.deleted_at.is_(None),
+                Session.title == expected_title,
+            )
+            .values(title=title)
+        )
+        return getattr(result, "rowcount", 0) == 1
 
     async def soft_delete_session(self, session_id: UUID) -> bool:
         result = await self.session.execute(

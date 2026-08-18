@@ -48,15 +48,19 @@ from ..agent.events import (
     RunEvent,
     RunFailed,
     TextDelta,
+    TitleGenerated,
+    TitleGenerationStarted,
     ToolFinished,
     ToolStarted,
     assistant_message_id,
     llm_span_id,
     reasoning_message_id,
+    title_span_id,
     tool_message_id,
 )
 from ..error_codes import RUN_FAILED_CODE, error_code
-from .custom_events import SpanPayload, ToolResultPayload, UsagePayload
+from ..llm.events import Usage
+from .custom_events import SpanPayload, TitlePayload, ToolResultPayload, UsagePayload
 
 logger = structlog.get_logger(__name__)
 
@@ -107,10 +111,64 @@ async def encode_sse(
     current_reasoning_id: UUID | None = None
     iteration_started_at = time.monotonic()
     tool_started_at: dict[str, float] = {}
+    title_started_at: float | None = None
+    title_model: str | None = None
 
     try:
         async for event in events:
             match event:
+                case TitleGenerationStarted(model=model_name):
+                    title_model = model_name
+                    title_started_at = time.monotonic()
+
+                case TitleGenerated(session_id=title_session_id, title=title, usage=usage):
+                    title_usage = usage or Usage(
+                        state="unavailable",
+                        input_tokens=None,
+                        output_tokens=None,
+                        reasoning_tokens=None,
+                    )
+                    duration_ms = (
+                        int((time.monotonic() - title_started_at) * 1000)
+                        if title_started_at is not None
+                        else 0
+                    )
+                    yield _emit(
+                        CustomEvent(
+                            type=EventType.CUSTOM,
+                            name="chatagents.title",
+                            value=TitlePayload(
+                                session_id=str(title_session_id), title=title
+                            ).model_dump(),
+                        )
+                    )
+                    yield _emit(
+                        CustomEvent(
+                            type=EventType.CUSTOM,
+                            name="chatagents.usage",
+                            value=UsagePayload(
+                                role="auxiliary",
+                                model=title_model or model,
+                                usage_status=title_usage.state,
+                                input_tokens=title_usage.input_tokens,
+                                output_tokens=title_usage.output_tokens,
+                                reasoning_tokens=title_usage.reasoning_tokens,
+                            ).model_dump(),
+                        )
+                    )
+                    yield _emit(
+                        CustomEvent(
+                            type=EventType.CUSTOM,
+                            name="chatagents.span",
+                            value=SpanPayload(
+                                span_id=str(title_span_id(run_id)),
+                                parent_span_id=None,
+                                kind="llm",
+                                duration_ms=duration_ms,
+                            ).model_dump(),
+                        )
+                    )
+
                 case IterationStarted(iteration=iteration):
                     current_assistant_id = assistant_message_id(run_id, iteration)
                     current_reasoning_id = reasoning_message_id(run_id, iteration)

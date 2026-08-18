@@ -55,6 +55,12 @@ def llm_span_id(run_id: str, iteration: int) -> UUID:
     return uuid5(_run_namespace(run_id), f"{iteration}:span")
 
 
+def title_span_id(run_id: str) -> UUID:
+    """为一次运行的标题模型调用派生稳定的兄弟跨度标识。"""
+
+    return uuid5(_run_namespace(run_id), "title:span")
+
+
 @dataclass(frozen=True, slots=True)
 class IterationStarted:
     """一次迭代边界及本次运行采用的输入配置版本指代。"""
@@ -63,6 +69,25 @@ class IterationStarted:
     iteration: int
     prompt_version_id: str | None = None
     tool_schema_version_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TitleGenerationStarted:
+    """标题 auxiliary 调用开始，供观测层打开兄弟跨度。"""
+
+    run_id: str
+    model: str
+
+
+@dataclass(frozen=True, slots=True)
+class TitleGenerated:
+    """标题调用完成；失败时携带回落标题与错误原因。"""
+
+    run_id: str
+    session_id: UUID
+    title: str
+    usage: Usage | None = None
+    error: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,6 +164,8 @@ class RunFailed:
 
 RunEvent = (
     IterationStarted
+    | TitleGenerationStarted
+    | TitleGenerated
     | TextDelta
     | ReasoningDelta
     | IterationCompleted

@@ -100,6 +100,12 @@ def _title_from_message(text: str) -> str:
     return title or "新对话"
 
 
+def fallback_title(text: str) -> str:
+    """返回首条用户消息的公开列表回落标题。"""
+
+    return _title_from_message(text)
+
+
 def _tool_calls(message: ModelMessage) -> list[ToolCallBlock]:
     return [block for block in message.content if isinstance(block, ToolCallBlock)]
 
@@ -312,6 +318,17 @@ class ConversationService:
     async def rename_session(self, session_id: UUID, title: str | None) -> SessionRow | None:
         return await self.repository.rename_session(session_id, title)
 
+    async def set_generated_title(
+        self, session_id: UUID, *, expected_title: str | None, title: str
+    ) -> bool:
+        """写入首轮生成标题，但不覆盖已有标题。"""
+
+        if expected_title is None:
+            return await self.repository.set_title_if_missing(session_id, title)
+        return await self.repository.replace_title_if_current(
+            session_id, expected_title=expected_title, title=title
+        )
+
     async def delete_session(self, session_id: UUID) -> bool:
         return bool(await self.repository.soft_delete_session(session_id))
 
@@ -320,18 +337,30 @@ class ConversationService:
     ) -> MessageRow:
         """Create the session and its first message in the caller's transaction."""
 
+        row, _ = await self.append_user_message_with_title_claim(
+            session_id=session_id, message_id=message_id, text=text
+        )
+        return row
+
+    async def append_user_message_with_title_claim(
+        self, *, session_id: UUID, message_id: UUID, text: str
+    ) -> tuple[MessageRow, bool]:
+        """追加用户消息，并在同一事务内原子认领首轮标题生成。"""
+
         if not text.strip():
             raise ProtocolError("User message must not be empty")
-        session = await self.repository.get_session(session_id)
+        session = await self.repository.get_session_for_update(session_id)
         if session is None:
             session = await self.repository.upsert_session(session_id)
-        if session.title is None:
+        title_claimed = session.title is None
+        if title_claimed:
             await self.repository.rename_session(session_id, _title_from_message(text))
-        return await self.append_model_message(
+        row = await self.append_model_message(
             session_id=session_id,
             message_id=message_id,
             message=ModelMessage(role="user", content=(TextBlock(text=text),)),
         )
+        return row, title_claimed
 
     async def append_model_message(
         self, *, session_id: UUID, message_id: UUID, message: ModelMessage

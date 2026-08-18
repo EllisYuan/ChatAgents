@@ -49,3 +49,10 @@ class ToolResultPayload(BaseModel):
     tool_call_id: str
     result: str
     duration_ms: int
+
+
+class TitlePayload(BaseModel):
+    """`chatagents.title`——首轮生成或回落后的会话标题。"""
+
+    session_id: str
+    title: str

@@ -37,6 +37,8 @@ jobs:
         run: uv sync --project backend --locked
       - name: Run backend tests
         run: uv run --project backend pytest backend/tests
+      - name: Run in-process REST contract gate
+        run: uv run --project backend pytest backend/tests/contract_test.py -m contract --maxfail=1
       - name: Run Ruff lint
         run: uv run --project backend ruff check --config=backend/pyproject.toml backend
       - name: Check Ruff formatting
