@@ -17,6 +17,7 @@ from chat_agents.llm.replay import (
     RecordingModelPort,
     ReplayModelPort,
     canonical_json_bytes,
+    deterministic_run_id,
 )
 from pydantic import SecretStr
 
@@ -140,6 +141,13 @@ def test_replay_rejects_usage_without_input_tokens() -> None:
 def test_replay_port_drives_runner_with_identical_fixed_run_id() -> None:
     source = RecordingModelPort(ScriptedPort([_events("answer", 123)]))
     messages = [ModelMessage(role="user", content=(TextBlock(text="hello"),))]
+    run_id = deterministic_run_id(
+        messages=messages,
+        tools=[],
+        model="model-a",
+        effort="medium",
+        profile=_profile(),
+    )
 
     async def collect(runner: AgentRunner) -> list[Any]:
         return [
@@ -151,7 +159,7 @@ def test_replay_port_drives_runner_with_identical_fixed_run_id() -> None:
                 auxiliary_model="aux-model",
                 effort="medium",
                 http_client=object(),
-                run_id="00000000-0000-0000-0000-000000000001",
+                run_id=run_id,
             )
         ]
 

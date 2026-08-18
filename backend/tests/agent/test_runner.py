@@ -65,9 +65,23 @@ class ScriptedModelPort:
         self.calls: list[dict[str, Any]] = []
 
     async def stream(
-        self, *, messages: Any, tools: Any, model: str, effort: EffortTier, profile: Any
+        self,
+        *,
+        messages: Any,
+        tools: Any,
+        model: str,
+        effort: EffortTier,
+        profile: Any,
+        system_prompt: str | None = None,
     ) -> AsyncIterator[ModelEvent]:
-        self.calls.append({"messages": list(messages), "model": model, "effort": effort})
+        self.calls.append(
+            {
+                "messages": list(messages),
+                "model": model,
+                "effort": effort,
+                "system_prompt": system_prompt,
+            }
+        )
         turn = self._turns[len(self.calls) - 1]
         for event in turn:
             yield event
@@ -359,6 +373,27 @@ def test_run_id_is_stable_and_present_on_every_event() -> None:
     run_ids = {e.run_id for e in events}
     assert len(run_ids) == 1
     assert next(iter(run_ids))  # 非空
+
+
+def test_runner_passes_runtime_prompt_without_putting_system_in_history() -> None:
+    port = ScriptedModelPort([[_completed(text="ok")]])
+    runner = AgentRunner(tool_executor=ToolExecutor({}), model_port_factory=lambda _p: port)
+
+    asyncio.run(
+        _collect(
+            runner,
+            messages=[ModelMessage(role="user", content=(TextBlock(text="嗨"),))],
+            profile=_profile(),
+            main_model="m",
+            effort="medium",
+            system_prompt="内部提示词",
+            prompt_version_id="system@v1",
+            tool_schema_version_id="tools-medium@v1",
+        )
+    )
+
+    assert port.calls[0]["system_prompt"] == "内部提示词"
+    assert [message.role for message in port.calls[0]["messages"]] == ["user"]
 
 
 def test_runner_module_imports_no_database_http_or_sse() -> None:

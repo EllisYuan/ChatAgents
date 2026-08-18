@@ -1,0 +1,75 @@
+"""``persist``——业务事务的增量落库包装（issue #52，ADR-0008）。
+
+每次模型调用完成即写一条助手消息，一轮工具结果全部到齐即写一条组合工具消息
+——不攒到运行结束再一把写。写失败直接向上抛（业务事务，失败要报错），最终
+由 ``transport.encode_sse`` 的外层 ``try/except`` 收敛成一条 ``RUN_ERROR``。
+客户端断连时生成器被取消，已经落的部分保持完好——这正是「增量」买到的东西。
+"""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+from typing import Any
+from uuid import UUID
+
+from ..agent.events import IterationCompleted, RunEvent, ToolFinished, ToolStarted, tool_message_id
+from ..agent.events import assistant_message_id as _assistant_message_id
+from ..llm.message import ModelMessage, ToolResultBlock
+from .service import ConversationService
+
+
+async def _append(
+    *, session_factory: Any, session_id: UUID, message_id: UUID, message: ModelMessage
+) -> None:
+    async with session_factory() as session, session.begin():
+        service = ConversationService(session)
+        await service.append_model_message(
+            session_id=session_id, message_id=message_id, message=message
+        )
+
+
+async def persist(
+    events: AsyncIterator[RunEvent],
+    *,
+    session_id: UUID,
+    session_factory: Any,
+) -> AsyncIterator[RunEvent]:
+    """透传每个 ``RunEvent``，旁路把消息增量写进 ``app.message``。"""
+
+    tool_call_order: list[str] = []
+    tool_results: dict[str, str] = {}
+
+    async for event in events:
+        if isinstance(event, IterationCompleted):
+            await _append(
+                session_factory=session_factory,
+                session_id=session_id,
+                message_id=_assistant_message_id(event.run_id, event.iteration),
+                message=event.message,
+            )
+            tool_call_order = []
+            tool_results = {}
+
+        elif isinstance(event, ToolStarted):
+            tool_call_order.append(event.tool_call_id)
+
+        elif isinstance(event, ToolFinished):
+            tool_results[event.tool_call_id] = event.result
+            if tool_call_order and set(tool_call_order) <= set(tool_results):
+                message = ModelMessage(
+                    role="tool",
+                    content=tuple(
+                        ToolResultBlock(tool_call_id=call_id, content=tool_results[call_id])
+                        for call_id in tool_call_order
+                    ),
+                )
+                await _append(
+                    session_factory=session_factory,
+                    session_id=session_id,
+                    message_id=tool_message_id(event.run_id, event.iteration),
+                    message=message,
+                )
+                tool_call_order = []
+                tool_results = {}
+
+        yield event

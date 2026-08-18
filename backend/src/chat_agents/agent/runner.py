@@ -10,8 +10,9 @@
 落库、落跨度、编码 SSE 由更外层的三重包装负责（``main.py``，见 issue #52），
 Runner 完全不知道它们存在。
 
-系统提示词的注入不在这一票范围内（见 ADR-0010、issue #54）——``messages``
-即模型输入序列，Runner 原样喂给 ``ModelPort``，不在中间插入任何一条消息。
+系统提示词作为独立运行配置传给 ``ModelPort``（见 ADR-0010、issue #54）。
+``messages`` 仍是对话记忆序列，Runner 原样喂给 ``ModelPort``，不在中间插入任何
+system 消息。
 """
 
 from __future__ import annotations
@@ -67,6 +68,9 @@ class AgentRunner:
         effort: EffortTier,
         http_client: Any,
         run_id: str | None = None,
+        system_prompt: str | None = None,
+        prompt_version_id: str | None = None,
+        tool_schema_version_id: str | None = None,
     ) -> AsyncIterator[RunEvent]:
         """跑一条完整运行：用户消息 → 模型调用 → （工具调用 → 模型调用）* → 最终回答。
 
@@ -91,19 +95,27 @@ class AgentRunner:
         iteration = 0
         while iteration < hard_cap:
             iteration += 1
-            yield IterationStarted(run_id=run_id, iteration=iteration)
+            yield IterationStarted(
+                run_id=run_id,
+                iteration=iteration,
+                prompt_version_id=prompt_version_id,
+                tool_schema_version_id=tool_schema_version_id,
+            )
 
             final_message: ModelMessage | None = None
             final_usage = None
             stop_reason = "unknown"
             try:
-                async for event in port.stream(
-                    messages=history,
-                    tools=tool_defs,
-                    model=main_model,
-                    effort=effort,
-                    profile=profile,
-                ):
+                stream_kwargs: dict[str, Any] = {
+                    "messages": history,
+                    "tools": tool_defs,
+                    "model": main_model,
+                    "effort": effort,
+                    "profile": profile,
+                }
+                if system_prompt is not None:
+                    stream_kwargs["system_prompt"] = system_prompt
+                async for event in port.stream(**stream_kwargs):
                     if isinstance(event, ModelTextDelta):
                         yield TextDelta(run_id=run_id, iteration=iteration, text=event.text)
                     elif isinstance(event, ModelReasoningDelta):
@@ -128,6 +140,7 @@ class AgentRunner:
             yield IterationCompleted(
                 run_id=run_id,
                 iteration=iteration,
+                message=final_message,
                 usage=final_usage,
                 stop_reason=stop_reason,
             )

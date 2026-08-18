@@ -3,8 +3,10 @@ from uuid import uuid4
 
 from chat_agents.conversation.service import (
     RETENTION_WINDOW,
+    RunInterval,
     project_messages,
     project_messages_with_metadata,
+    select_prunable_run_intervals,
 )
 from chat_agents.llm.message import ToolResultBlock
 
@@ -103,6 +105,23 @@ def test_masking_metadata_contains_call_arguments_and_sources() -> None:
     assert {source.url for source in observation.sources} == {"https://example.com/context"}
     assert observation.sources[0].title == "Context Editing"
     assert projection.attributes["masked_observation_ids"] == ["call-1"]
+
+
+def test_pruning_selection_protects_first_running_and_current_runs() -> None:
+    intervals = [
+        RunInterval("first", 0, 2, "completed"),
+        RunInterval("old", 3, 5, "completed"),
+        RunInterval("active", 6, None, "running"),
+        RunInterval("current", 9, 11, "completed"),
+    ]
+
+    selected = select_prunable_run_intervals(
+        intervals,
+        prune_count=3,
+        current_run_id="current",
+    )
+
+    assert [interval.id for interval in selected] == ["old"]
 
 
 def test_pruned_ranges_remove_whole_runs_without_creating_orphans() -> None:

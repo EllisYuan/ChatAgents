@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection, Iterable, Sequence
+from collections.abc import AsyncIterator, Collection, Iterable, Sequence
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -14,7 +15,12 @@ from ..db.app import Message as MessageRow
 from ..db.app import Session as SessionRow
 from ..exceptions import ProtocolError
 from ..llm.message import ModelMessage, TextBlock, ToolCallBlock, ToolResultBlock
-from .masking import RETENTION_WINDOW, MaskedObservation, MaskingProjection, mask_tool_observations
+from .masking import (
+    MASKED_OBSERVATION_IDS_KEY,
+    RETENTION_WINDOW,
+    MaskedObservation,
+    mask_tool_observations,
+)
 from .models import (
     SessionDetail,
     SessionSummary,
@@ -25,25 +31,70 @@ from .models import (
 )
 from .repository import ConversationRepository
 
+OBSERVATION_KEEP = RETENTION_WINDOW
 _ORPHAN_TOOL_RESULT = "Tool call ended before a result was recorded."
 _TITLE_LIMIT = 30
-OBSERVATION_KEEP = RETENTION_WINDOW
+
+
+@dataclass(frozen=True, slots=True)
+class RunInterval:
+    """由 observability 层传入的一次运行消息区间。"""
+
+    id: UUID | str
+    start_seq: int
+    end_seq: int | None
+    status: str = "running"
+
+    def __post_init__(self) -> None:
+        if self.end_seq is not None and self.end_seq < self.start_seq:
+            raise ValueError("run interval end_seq must not precede start_seq")
+
+
+def select_prunable_run_intervals(
+    intervals: Iterable[RunInterval],
+    *,
+    prune_count: int,
+    current_run_id: UUID | str | None = None,
+) -> tuple[RunInterval, ...]:
+    """选择下一次投影可整块省略的最旧已完成运行。
+
+    输入必须包含会话中的全部运行并按消息起始序列排序；首个运行永不入选。
+    ``running`` 或没有结束序列的运行也永不入选，当前运行额外按标识保护。
+    """
+
+    if prune_count < 0:
+        raise ValueError("prune_count must be non-negative")
+    ordered = sorted(intervals, key=lambda interval: interval.start_seq)
+    if not ordered or prune_count == 0:
+        return ()
+    current_id = str(current_run_id) if current_run_id is not None else None
+    candidates = [
+        interval
+        for interval in ordered[1:]
+        if interval.end_seq is not None
+        and interval.status != "running"
+        and (current_id is None or str(interval.id) != current_id)
+    ]
+    return tuple(candidates[:prune_count])
 
 
 @dataclass(frozen=True, slots=True)
 class ModelInputProjection:
-    """一次模型输入重建的消息投影及其掩蔽事实。"""
+    """一次模型输入重建的消息投影及其观测事实。"""
 
     messages: list[ModelMessage]
     masked_observations: tuple[MaskedObservation, ...]
+    pruned_run_ids: tuple[str, ...] = ()
     retention_window: int = RETENTION_WINDOW
 
     @property
     def attributes(self) -> dict[str, Any]:
-        return MaskingProjection(
-            messages=self.messages,
-            masked_observations=self.masked_observations,
-        ).attributes
+        return {
+            MASKED_OBSERVATION_IDS_KEY: [
+                observation.tool_call_id for observation in self.masked_observations
+            ],
+            "pruned_runs": list(self.pruned_run_ids),
+        }
 
 
 def _title_from_message(text: str) -> str:
@@ -90,7 +141,13 @@ def _project_messages_unmasked(
     round_trip_from_seq: int | None = None,
     skipped_seq_ranges: Sequence[tuple[int, int]] = (),
 ) -> list[ModelMessage]:
-    """先重建有效消息序列，再由外层投影阶段施加观察掩蔽。"""
+    """把存储消息投影为合法的 protocol-neutral 模型输入序列。
+
+    ``system`` 不是合法的存储角色，投影中永远不输出。助手工具调用必须紧跟
+    工具结果；如果进程在结果落库前停止，只在本次投影中合成协议错误结果，
+    不修改来源行。``skipped_seq_ranges`` 只从投影中省略完整运行区间，
+    不删除或修改来源行。
+    """
 
     def is_skipped(seq: int) -> bool:
         return any(start <= seq <= end for start, end in skipped_seq_ranges)
@@ -117,7 +174,12 @@ def _project_messages_unmasked(
                 projected.append(ModelMessage(role="tool", content=results))
                 index += 2
                 continue
-            projected.append(ModelMessage(role="tool", content=_repair_tool_results(calls, ())))
+            projected.append(
+                ModelMessage(
+                    role="tool",
+                    content=_repair_tool_results(calls, ()),
+                )
+            )
         index += 1
     return projected
 
@@ -126,14 +188,28 @@ def project_messages(
     rows: Iterable[MessageRow],
     *,
     round_trip_from_seq: int | None = None,
+    skipped_ranges: Sequence[tuple[int, int]] = (),
+    observation_keep: int | None = None,
+    run_intervals: Sequence[RunInterval] = (),
+    pruned_run_count: int = 0,
+    current_run_id: UUID | str | None = None,
     skipped_seq_ranges: Sequence[tuple[int, int]] = (),
-    retention_window: int = RETENTION_WINDOW,
+    retention_window: int | None = None,
 ) -> list[ModelMessage]:
-    """重建模型输入，并在投影期掩蔽较早的工具观察。"""
+    """重建模型输入，并在投影期掩蔽较早的工具观察。
+
+    ``skipped_ranges`` / ``observation_keep`` 是领域接口；带 ``seq`` 和
+    ``retention`` 的两个参数是早期调用方的兼容别名。
+    """
 
     return project_messages_with_metadata(
         rows,
         round_trip_from_seq=round_trip_from_seq,
+        skipped_ranges=skipped_ranges,
+        observation_keep=observation_keep,
+        run_intervals=run_intervals,
+        pruned_run_count=pruned_run_count,
+        current_run_id=current_run_id,
         skipped_seq_ranges=skipped_seq_ranges,
         retention_window=retention_window,
     ).messages
@@ -143,21 +219,53 @@ def project_messages_with_metadata(
     rows: Iterable[MessageRow],
     *,
     round_trip_from_seq: int | None = None,
+    skipped_ranges: Sequence[tuple[int, int]] = (),
+    observation_keep: int | None = None,
+    run_intervals: Sequence[RunInterval] = (),
+    pruned_run_count: int = 0,
+    current_run_id: UUID | str | None = None,
+    pruned_run_ids: Sequence[UUID | str] = (),
     skipped_seq_ranges: Sequence[tuple[int, int]] = (),
-    retention_window: int = RETENTION_WINDOW,
+    retention_window: int | None = None,
 ) -> ModelInputProjection:
-    """重建模型输入，并返回本次掩蔽的观测事实。"""
+    """重建模型输入，并返回掩蔽与整块削减的观测事实。"""
 
+    if skipped_ranges and skipped_seq_ranges:
+        raise ValueError("pass only one of skipped_ranges and skipped_seq_ranges")
+    if run_intervals and (skipped_ranges or skipped_seq_ranges):
+        raise ValueError("pass either run_intervals or explicit skipped ranges")
+    if observation_keep is not None and retention_window is not None:
+        raise ValueError("pass only one of observation_keep and retention_window")
+    selected_runs = select_prunable_run_intervals(
+        run_intervals,
+        prune_count=pruned_run_count,
+        current_run_id=current_run_id,
+    )
+    effective_ranges = (
+        tuple((run.start_seq, run.end_seq) for run in selected_runs if run.end_seq is not None)
+        if run_intervals
+        else skipped_ranges or skipped_seq_ranges
+    )
+    effective_keep = (
+        observation_keep
+        if observation_keep is not None
+        else retention_window
+        if retention_window is not None
+        else RETENTION_WINDOW
+    )
     projected = _project_messages_unmasked(
         rows,
         round_trip_from_seq=round_trip_from_seq,
-        skipped_seq_ranges=skipped_seq_ranges,
+        skipped_seq_ranges=effective_ranges,
     )
-    masking = mask_tool_observations(projected, retention_window=retention_window)
+    masking = mask_tool_observations(projected, retention_window=effective_keep)
+    selected_ids = tuple(str(run.id) for run in selected_runs)
+    recorded_ids = tuple(str(run_id) for run_id in pruned_run_ids)
     return ModelInputProjection(
         messages=masking.messages,
         masked_observations=masking.masked_observations,
-        retention_window=retention_window,
+        pruned_run_ids=selected_ids or recorded_ids,
+        retention_window=effective_keep,
     )
 
 
@@ -206,7 +314,7 @@ class ConversationService:
         return await self.repository.rename_session(session_id, title)
 
     async def delete_session(self, session_id: UUID) -> bool:
-        return await self.repository.soft_delete_session(session_id)
+        return bool(await self.repository.soft_delete_session(session_id))
 
     async def append_user_message(
         self, *, session_id: UUID, message_id: UUID, text: str
@@ -252,17 +360,60 @@ class ConversationService:
         return row
 
     async def rebuild_model_input(
-        self, session_id: UUID, *, round_trip_from_seq: int | None = None
+        self,
+        session_id: UUID,
+        *,
+        round_trip_from_seq: int | None = None,
+        skipped_ranges: Sequence[tuple[int, int]] = (),
+        observation_keep: int | None = None,
+        run_intervals: Sequence[RunInterval] = (),
+        pruned_run_count: int = 0,
+        current_run_id: UUID | str | None = None,
+        skipped_seq_ranges: Sequence[tuple[int, int]] = (),
+        retention_window: int | None = None,
     ) -> list[ModelMessage]:
         rows = await self.repository.list_messages(session_id)
-        return project_messages(rows, round_trip_from_seq=round_trip_from_seq)
+        return project_messages(
+            rows,
+            round_trip_from_seq=round_trip_from_seq,
+            skipped_ranges=skipped_ranges,
+            observation_keep=observation_keep,
+            run_intervals=run_intervals,
+            pruned_run_count=pruned_run_count,
+            current_run_id=current_run_id,
+            skipped_seq_ranges=skipped_seq_ranges,
+            retention_window=retention_window,
+        )
 
     async def clear_round_trip_payload(
         self, *, session_id: UUID, message_ids: Collection[UUID]
     ) -> int:
-        return await self.repository.clear_round_trip_payload(
-            session_id=session_id, message_ids=message_ids
+        return int(
+            await self.repository.clear_round_trip_payload(
+                session_id=session_id, message_ids=message_ids
+            )
         )
+
+    @asynccontextmanager
+    async def round_trip_payload_scope(
+        self, *, session_factory: Any, session_id: UUID
+    ) -> AsyncIterator[set[UUID]]:
+        """在运行终态清空本次运行登记的 opaque payload。
+
+        调用方在每次增量写入助手消息后把行标识加入集合；``finally`` 覆盖成功、
+        失败和 ``CancelledError``（客户端断连）三条终态路径。清理使用短事务，
+        不借用持续流式请求的数据库 session。
+        """
+
+        message_ids: set[UUID] = set()
+        try:
+            yield message_ids
+        finally:
+            await self.short_transaction_clear_round_trip_payload(
+                session_factory=session_factory,
+                session_id=session_id,
+                message_ids=message_ids,
+            )
 
     async def short_transaction_append(
         self, *, session_factory: Any, session_id: UUID, message_id: UUID, message: ModelMessage

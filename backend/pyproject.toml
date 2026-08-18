@@ -38,6 +38,9 @@ dependencies = [
     "openai>=3.0.0,<4",
     "httpx2>=2.9,<3",
     "anthropic>=0.99.0,<1",
+    "ag-ui-protocol==0.1.19",
+    "sse-starlette>=3.4.8",
+    "structlog>=26.1.0",
 ]
 
 [dependency-groups]

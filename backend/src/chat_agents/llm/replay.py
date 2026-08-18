@@ -11,6 +11,7 @@ from collections.abc import AsyncIterator, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
+from uuid import NAMESPACE_URL, uuid5
 
 from .effort import EffortTier
 from .events import (
@@ -207,6 +208,29 @@ def _request_dict(
             "auth_field": profile.auth_field,
         },
     }
+
+
+_REPLAY_RUN_NAMESPACE = uuid5(NAMESPACE_URL, "chat-agents/replay")
+
+
+def deterministic_run_id(
+    *,
+    messages: Sequence[ModelMessage],
+    tools: Sequence[Any],
+    model: str,
+    effort: EffortTier,
+    profile: EndpointProfile,
+) -> str:
+    """从一次 replay 输入稳定派生运行标识，不把鉴权信息纳入命名空间。"""
+
+    request = _request_dict(
+        messages=messages,
+        tools=tools,
+        model=model,
+        effort=effort,
+        profile=profile,
+    )
+    return str(uuid5(_REPLAY_RUN_NAMESPACE, canonical_json_bytes(request).decode("utf-8")))
 
 
 @dataclass(frozen=True, slots=True)

@@ -84,15 +84,21 @@ def _strip_display_summary(reasoning_item: dict[str, Any]) -> dict[str, Any]:
 
 
 def build_request(
-    *, messages: Sequence[ModelMessage], tools: Sequence[Any], model: str, effort: EffortTier
+    *,
+    messages: Sequence[ModelMessage],
+    tools: Sequence[Any],
+    model: str,
+    effort: EffortTier,
+    system_prompt: str | None = None,
 ) -> dict[str, Any]:
-    instructions = "\n\n".join(
+    stored_instructions = "\n\n".join(
         block.text
         for message in messages
         if message.role == "system"
         for block in message.content
         if isinstance(block, TextBlock)
     )
+    instructions = "\n\n".join(text for text in (system_prompt, stored_instructions) if text)
     input_items: list[dict[str, Any]] = []
     for message in messages:
         if message.role == "system":
@@ -175,6 +181,8 @@ class _Accumulator:
                 arguments = json.loads(item.arguments) if item.arguments else {}
                 content.append(ToolCallBlock(id=item.call_id, name=item.name, arguments=arguments))
             elif item_type == "reasoning":
+                # ``summary`` 已通过 ReasoningDelta 进入观测跨度；它不是模型输入，
+                # 因此 opaque 消息附件只保留 Responses 要求回传的加密载荷。
                 content.append(
                     OpaqueBlock(
                         protocol="openai_responses",
@@ -182,7 +190,6 @@ class _Accumulator:
                             "type": "reasoning",
                             "id": item.id,
                             "encrypted_content": getattr(item, "encrypted_content", None),
-                            "summary": getattr(item, "summary", []),
                         },
                     )
                 )
@@ -217,9 +224,16 @@ class OpenAIResponsesAdapter:
         model: str,
         effort: EffortTier,
         profile: EndpointProfile,
+        system_prompt: str | None = None,
     ) -> AsyncIterator[ModelEvent]:
         del profile
-        payload = build_request(messages=messages, tools=tools, model=model, effort=effort)
+        payload = build_request(
+            messages=messages,
+            tools=tools,
+            model=model,
+            effort=effort,
+            system_prompt=system_prompt,
+        )
         acc = _Accumulator()
         raw_stream = await self._client.responses.create(**payload)
         try:

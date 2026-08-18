@@ -17,17 +17,52 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from ..llm.events import Usage
 from ..llm.message import ModelMessage
 
 
+def _run_namespace(run_id: str) -> UUID:
+    try:
+        return UUID(run_id)
+    except ValueError:
+        # 回放测试可使用非 UUID 的运行标识，先把它稳定映射到 UUID 命名空间。
+        return uuid5(NAMESPACE_URL, run_id)
+
+
+def reasoning_message_id(run_id: str, iteration: int) -> UUID:
+    """为一次迭代的显示摘要派生独立且稳定的消息标识。"""
+
+    return uuid5(_run_namespace(run_id), f"{iteration}:reasoning")
+
+
+def assistant_message_id(run_id: str, iteration: int) -> UUID:
+    """为一次迭代产出的助手消息派生稳定标识（ADR-0009：``uuid5`` 确定性派生）。"""
+
+    return uuid5(_run_namespace(run_id), f"{iteration}:assistant")
+
+
+def tool_message_id(run_id: str, iteration: int) -> UUID:
+    """为一次迭代的工具结果组合消息派生稳定标识（同一轮全部工具结果落一行）。"""
+
+    return uuid5(_run_namespace(run_id), f"{iteration}:tool")
+
+
+def llm_span_id(run_id: str, iteration: int) -> UUID:
+    """为一次迭代的模型调用跨度派生稳定标识（线上 ``chatagents.span`` 载荷用）。"""
+
+    return uuid5(_run_namespace(run_id), f"{iteration}:span")
+
+
 @dataclass(frozen=True, slots=True)
 class IterationStarted:
-    """一次迭代（一次模型调用 + 它触发的工具调用）的边界起点。"""
+    """一次迭代边界及本次运行采用的输入配置版本指代。"""
 
     run_id: str
     iteration: int
+    prompt_version_id: str | None = None
+    tool_schema_version_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,13 +80,25 @@ class ReasoningDelta:
     iteration: int
     text: str
 
+    @property
+    def message_id(self) -> UUID:
+        """返回本次迭代共享的摘要消息标识，不复用助手消息标识。"""
+
+        return reasoning_message_id(self.run_id, self.iteration)
+
 
 @dataclass(frozen=True, slots=True)
 class IterationCompleted:
-    """一次迭代的边界终点——本次模型调用的用量与终止原因。"""
+    """一次迭代的边界终点——本次模型调用产出的完整助手消息、用量与终止原因。
+
+    ``message`` 是这一轮追加进历史之前的那条助手消息（issue #52）：调用工具的
+    中间轮次不会再产出 ``RunCompleted``，只有这个事件承载它们的完整内容，是
+    ``persist`` 包装器逐轮落库消息表的唯一入口。
+    """
 
     run_id: str
     iteration: int
+    message: ModelMessage
     usage: Usage
     stop_reason: str
 
