@@ -15,6 +15,7 @@ from ..db.app import Message as MessageRow
 from ..db.app import Session as SessionRow
 from ..exceptions import ProtocolError
 from ..llm.message import ModelMessage, TextBlock, ToolCallBlock, ToolResultBlock
+from ..validation import MAX_TITLE_LENGTH
 from .masking import RETENTION_WINDOW, MaskedObservation, MaskingProjection, mask_tool_observations
 from .models import (
     SessionDetail,
@@ -28,7 +29,6 @@ from .repository import ConversationRepository
 
 OBSERVATION_KEEP = RETENTION_WINDOW
 _ORPHAN_TOOL_RESULT = "Tool call ended before a result was recorded."
-_TITLE_LIMIT = 30
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,8 +95,8 @@ class ModelInputProjection:
 
 def _title_from_message(text: str) -> str:
     title = " ".join(text.strip().split())
-    if len(title) > _TITLE_LIMIT:
-        return f"{title[:_TITLE_LIMIT]}..."
+    if len(title) > MAX_TITLE_LENGTH:
+        return f"{title[:MAX_TITLE_LENGTH]}..."
     return title or "新对话"
 
 

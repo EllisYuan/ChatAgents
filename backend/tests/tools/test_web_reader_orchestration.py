@@ -1,5 +1,6 @@
 import asyncio
 
+import pytest
 from chat_agents.tools.web_reader.orchestration import (
     FALLBACK_TRUNCATE_CHARS,
     build_document,
@@ -36,8 +37,10 @@ def test_parse_sections_returns_empty_when_no_headings():
     assert parse_sections("没有任何标题的纯文本") == []
 
 
-def test_parse_section_indices_ignores_non_numeric_junk():
-    assert parse_section_indices("3, 5, x") == [3, 5]
+@pytest.mark.parametrize("value", ["3, 5, x", "0", "1,,2", "1,1"])
+def test_parse_section_indices_rejects_malformed_values(value: str) -> None:
+    with pytest.raises(ValueError):
+        parse_section_indices(value)
 
 
 def test_short_document_returns_full_text_untouched():

@@ -29,6 +29,7 @@ from ..llm.events import TextDelta as ModelTextDelta
 from ..llm.message import ContentBlock, ModelMessage, TextBlock, ToolCallBlock, ToolResultBlock
 from ..llm.port import ModelPort, get_model_port
 from ..llm.profile import EndpointProfile
+from ..validation import MAX_TITLE_LENGTH
 from .events import (
     IterationCompleted,
     IterationStarted,
@@ -47,7 +48,6 @@ from .tool_execution import RunToolContext
 from .tool_executor import ToolCallFinished, ToolCallStarted, ToolExecutor, ToolProgramError
 
 ModelPortFactory = Callable[[EndpointProfile], ModelPort]
-_TITLE_LIMIT = 30
 _TITLE_TIMEOUT_SECONDS = 5.0
 
 
@@ -55,8 +55,8 @@ def _fallback_title(text: str) -> str:
     """把首条用户消息压成公开列表可用的一行标题。"""
 
     normalized = " ".join(text.strip().split())
-    if len(normalized) > _TITLE_LIMIT:
-        return f"{normalized[:_TITLE_LIMIT]}..."
+    if len(normalized) > MAX_TITLE_LENGTH:
+        return f"{normalized[:MAX_TITLE_LENGTH]}..."
     return normalized or "新对话"
 
 
@@ -113,7 +113,7 @@ class AgentRunner:
             return TitleGenerated(
                 run_id=run_id,
                 session_id=session_id,
-                title=title[:_TITLE_LIMIT],
+                title=title[:MAX_TITLE_LENGTH],
                 usage=usage,
             )
         except Exception as exc:

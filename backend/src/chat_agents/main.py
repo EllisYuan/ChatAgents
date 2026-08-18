@@ -23,9 +23,10 @@ from uuid import UUID, uuid4
 import httpx
 import structlog
 from fastapi import Depends, FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sse_starlette.sse import EventSourceResponse
 
 from .agent.runner import AgentRunner
@@ -57,6 +58,7 @@ from .observability.router import router as observability_router
 from .observability.streaming import observe
 from .transport.custom_events import SpanPayload, TitlePayload, ToolResultPayload, UsagePayload
 from .transport.sse import encode_sse
+from .validation import MAX_MESSAGE_LENGTH, validate_non_blank
 
 configure_logging()
 logger = structlog.get_logger(__name__)
@@ -100,6 +102,16 @@ def _custom_openapi() -> dict[str, Any]:
         ("ProblemDetails", ProblemDetails),
     ):
         schemas[name] = model.model_json_schema(ref_template="#/components/schemas/{model}")
+    problem_response = {
+        "description": "请求参数不合法",
+        "content": {
+            "application/problem+json": {"schema": {"$ref": "#/components/schemas/ProblemDetails"}}
+        },
+    }
+    for path_item in schema["paths"].values():
+        for operation in path_item.values():
+            if isinstance(operation, dict) and "responses" in operation:
+                operation["responses"].setdefault("400", problem_response)
     app.openapi_schema = schema
     return schema
 
@@ -114,9 +126,16 @@ class RunRequest(BaseModel):
     的范围，这里先打通「一条 POST 端点跑通完整流式运行」这条链路。
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     session_id: UUID
-    message: str
+    message: str = Field(min_length=1, max_length=MAX_MESSAGE_LENGTH)
     effort: EffortTier = "medium"
+
+    @field_validator("message")
+    @classmethod
+    def _validate_message(cls, value: str) -> str:
+        return validate_non_blank(value, field="message", max_length=MAX_MESSAGE_LENGTH)
 
 
 def _problem_response(exc: ChatAgentsError) -> JSONResponse:
@@ -142,6 +161,22 @@ def _problem_response(exc: ChatAgentsError) -> JSONResponse:
 async def _domain_error_handler(request: Request, exc: ChatAgentsError) -> JSONResponse:
     del request
     return _problem_response(exc)
+
+
+def _validation_detail(exc: RequestValidationError) -> str:
+    errors: list[str] = []
+    for error in exc.errors():
+        location = ".".join(str(part) for part in error.get("loc", ())) or "request"
+        errors.append(f"{location}: {error.get('msg', '输入不合法')}")
+    return "请求参数校验失败：" + "; ".join(errors)
+
+
+@app.exception_handler(RequestValidationError)
+async def _request_validation_error_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    del request
+    return _problem_response(ProtocolError(_validation_detail(exc)))
 
 
 def _health_payload() -> HealthResponse:
@@ -298,9 +333,6 @@ def get_agent_runner() -> AgentRunner:
 async def create_run(
     request: RunRequest, runner: Annotated[AgentRunner, Depends(get_agent_runner)]
 ) -> EventSourceResponse:
-    if not request.message.strip():
-        raise ProtocolError("User message must not be empty")
-
     session_factory = get_session_factory()
     settings = Settings()
 

@@ -21,6 +21,7 @@ from urllib.parse import urlsplit, urlunsplit
 import httpx2
 
 from ..model_catalog import ModelCatalog, ModelCatalogStore, ModelItem
+from ..validation import validate_base_url, validate_model_identifier, validate_non_blank
 from .profile import EndpointProfile
 from .server_config import ServerEndpointsConfig, build_available_profiles
 
@@ -47,6 +48,7 @@ class ModelsHttpClient(Protocol):
 
 def models_url(base_url: str) -> str:
     """把端点档案规范化为 OpenAI 风格的 ``/v1/models`` URL。"""
+    validate_base_url(base_url)
     parts = urlsplit(base_url)
     path = parts.path.rstrip("/")
     path = f"{path}/models" if path == "/v1" or path.endswith("/v1") else f"{path}/v1/models"
@@ -67,10 +69,18 @@ def _parse_models(payload: Any) -> tuple[ModelItem, ...]:
             raise ValueError(f"模型清单 data[{index}] 必须是对象")
         model_id = raw_item.get("id")
         owned_by = raw_item.get("owned_by")
-        if not isinstance(model_id, str) or not model_id:
-            raise ValueError(f"模型清单 data[{index}] 缺少非空字符串 id")
-        if not isinstance(owned_by, str) or not owned_by:
-            raise ValueError(f"模型清单 data[{index}] 缺少非空字符串 owned_by")
+        if not isinstance(model_id, str):
+            raise ValueError(f"模型清单 data[{index}] 缺少字符串 id")
+        try:
+            model_id = validate_model_identifier(model_id)
+        except ValueError as exc:
+            raise ValueError(f"模型清单 data[{index}] 的 id 不合法：{exc}") from exc
+        if not isinstance(owned_by, str):
+            raise ValueError(f"模型清单 data[{index}] 缺少字符串 owned_by")
+        try:
+            validate_non_blank(owned_by, field="owned_by", max_length=256)
+        except ValueError as exc:
+            raise ValueError(f"模型清单 data[{index}] 的 owned_by 不合法：{exc}") from exc
         if model_id in seen:
             continue
         seen.add(model_id)

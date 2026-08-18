@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Any, cast
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ..db.app import Message as MessageRow
 from ..db.app import Session as SessionRow
@@ -26,6 +26,7 @@ from ..llm.message import (
     ToolResultBlock,
 )
 from ..llm.protocol import PROTOCOLS, Protocol
+from ..validation import MAX_MESSAGE_LENGTH, MAX_TITLE_LENGTH, validate_non_blank
 
 
 class SessionSummary(BaseModel):
@@ -67,12 +68,28 @@ class SessionDetail(SessionView):
 
 
 class RenameSessionRequest(BaseModel):
-    title: str | None = None
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = Field(default=None, max_length=MAX_TITLE_LENGTH)
+
+    @field_validator("title")
+    @classmethod
+    def _validate_title(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return validate_non_blank(value, field="title", max_length=MAX_TITLE_LENGTH).strip()
 
 
 class UserMessageRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     id: UUID
-    content: str
+    content: str = Field(min_length=1, max_length=MAX_MESSAGE_LENGTH)
+
+    @field_validator("content")
+    @classmethod
+    def _validate_content(cls, value: str) -> str:
+        return validate_non_blank(value, field="content", max_length=MAX_MESSAGE_LENGTH)
 
 
 def _encode_block(block: ContentBlock) -> dict[str, Any] | None:

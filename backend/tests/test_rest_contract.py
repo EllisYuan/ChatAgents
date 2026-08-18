@@ -8,8 +8,10 @@ from typing import Any
 from uuid import uuid4
 
 import httpx
+import pytest
 from chat_agents import main as main_module
 from chat_agents.model_catalog import ModelItem
+from chat_agents.validation import MAX_MESSAGE_LENGTH, MAX_TITLE_LENGTH
 
 
 class _Store:
@@ -127,6 +129,7 @@ def test_openapi_contains_rest_and_custom_payload_schemas() -> None:
     schema = main_module.app.openapi()
     paths = schema["paths"]
     assert "/api/models" in paths
+    assert "400" in paths["/api/runs"]["post"]["responses"]
     assert "/api/models/refresh" in paths
     assert "/health" in paths
     assert "/" not in paths
@@ -135,5 +138,64 @@ def test_openapi_contains_rest_and_custom_payload_schemas() -> None:
         "ChatAgentsUsagePayload",
         "ChatAgentsSpanPayload",
         "ChatAgentsToolResultPayload",
+        "ChatAgentsTitlePayload",
         "ProblemDetails",
     } <= schemas.keys()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"session_id": "not-a-uuid", "message": "hello"},
+        {"session_id": str(uuid4()), "message": "   "},
+        {"session_id": str(uuid4()), "message": "hello", "unexpected": True},
+        {"session_id": str(uuid4()), "message": "x" * (MAX_MESSAGE_LENGTH + 1)},
+    ],
+)
+def test_run_input_validation_returns_problem_details_before_stream(
+    payload: dict[str, object],
+) -> None:
+    async def scenario() -> None:
+        async with _client() as client:
+            response = await client.post("/api/runs", json=payload)
+        assert response.status_code == 400
+        assert response.headers["content-type"].startswith("application/problem+json")
+        body = response.json()
+        assert body["type"] == "protocol_error"
+        assert body["status"] == 400
+        assert "请求参数校验失败" in body["detail"]
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"title": "   "},
+        {"title": "x" * (MAX_TITLE_LENGTH + 1)},
+        {"title": "有效", "unexpected": True},
+    ],
+)
+def test_rename_input_validation_returns_problem_details(payload: dict[str, object]) -> None:
+    async def scenario() -> None:
+        async with _client() as client:
+            response = await client.patch(f"/api/sessions/{uuid4()}", json=payload)
+        assert response.status_code == 400
+        assert response.headers["content-type"].startswith("application/problem+json")
+        assert response.json()["type"] == "protocol_error"
+
+    asyncio.run(scenario())
+
+
+def test_model_refresh_rejects_malformed_custom_endpoint() -> None:
+    async def scenario() -> None:
+        async with _client() as client:
+            response = await client.post(
+                "/api/models/refresh",
+                json={"base_url": "not-a-url", "api_key": "key"},
+            )
+        assert response.status_code == 400
+        assert response.headers["content-type"].startswith("application/problem+json")
+        assert response.json()["type"] == "protocol_error"
+
+    asyncio.run(scenario())
