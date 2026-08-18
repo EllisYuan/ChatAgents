@@ -17,6 +17,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="允许真实上游测试写出 ModelPort replay 录制物",
     )
+    parser.addoption(
+        "--eval-retention-window",
+        type=int,
+        default=None,
+        help="release 评测使用的观察保留窗口",
+    )
 
 
 @pytest.fixture

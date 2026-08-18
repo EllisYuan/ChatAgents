@@ -55,6 +55,7 @@ Thumbs.db
 .pytest_cache/
 .coverage
 htmlcov/
+.eval-reports/
 
 # 临时文件
 *.tmp

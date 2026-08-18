@@ -10,6 +10,14 @@ uv run --project backend pytest backend/tests
 uv run --project backend pytest -m eval backend/tests/evals
 ```
 
+## CI 挂钩
+
+PR 上的 `eval-trigger` job 在临时 Postgres 中先播种 base revision 的模型输入版本，再只读比较当前 checkout 与版本表最新行的 `content_hash`。它不按文件路径判断，因此变量拼装逻辑的改动也会触发评测；无关改动不会启动付费评测 job。
+
+发生提示词或工具集变更时，`eval` job 在同一次 CI 内用同一批数据跑旧版与新版，不读取历史分数作为基线。四个努力档位各取 8 条，共 32 条；判官型号由 `EVAL_JUDGE_MODEL` 注入。评测 job 使用 `continue-on-error`，只提供警告，不阻断合并。
+
+在 PR 上添加 `skip-eval` 标签可以跳过付费评测。release tag 或手动 workflow 的 release 输入会运行保留窗口 `N ∈ {1,2,3,5,8}` 的网格扫描，并使用 `EVAL_RELEASE_JUDGE_MODEL`；该扫描不参与 PR 门禁。
+
 ## 数据流
 
 1. `EvalDataset` 读取场景，并仅按「提示词版本 × 工具集版本 × 努力档位」分组。查询文本不参与分组。
