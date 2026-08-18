@@ -174,8 +174,10 @@ def row_to_model_message(row: MessageRow, *, include_round_trip: bool = True) ->
 
 
 def row_to_view(row: MessageRow) -> MessageView:
-    return MessageView.model_validate(row)
+    view: MessageView = MessageView.model_validate(row)
+    return view
 
 
 def session_to_view(row: SessionRow) -> SessionView:
-    return SessionView.model_validate(row)
+    view: SessionView = SessionView.model_validate(row)
+    return view

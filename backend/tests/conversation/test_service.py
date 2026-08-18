@@ -12,7 +12,7 @@ from chat_agents.llm.message import (
 )
 
 
-def _row(seq: int, role: str, content: list[dict], payload: dict | None = None):
+def _row(seq: int, role: str, content: list[dict], payload: dict | None = None) -> SimpleNamespace:
     return SimpleNamespace(
         id=uuid4(),
         session_id=uuid4(),

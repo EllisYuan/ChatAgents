@@ -40,7 +40,8 @@ class ConversationRepository:
         result = await self.session.execute(
             select(Session).where(Session.id == session_id, Session.deleted_at.is_(None))
         )
-        return result.scalar_one_or_none()
+        row: Session | None = result.scalar_one_or_none()
+        return row
 
     async def list_sessions(
         self,
@@ -86,7 +87,7 @@ class ConversationRepository:
         )
         await self.session.execute(statement)
         result = await self.session.execute(select(Session).where(Session.id == session_id))
-        row = result.scalar_one()
+        row: Session = result.scalar_one()
         if row.deleted_at is not None:
             raise SessionNotFound("Cannot append to a deleted session")
         return row
@@ -122,7 +123,8 @@ class ConversationRepository:
             .join(Session, Session.id == Message.session_id)
             .where(Message.id == message_id, Session.deleted_at.is_(None))
         )
-        return result.scalar_one_or_none()
+        row: Message | None = result.scalar_one_or_none()
+        return row
 
     async def next_message_seq(self, session_id: UUID) -> int:
         lock = await self.session.execute(
