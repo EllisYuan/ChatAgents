@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Annotated, Any, Literal
 from uuid import UUID, uuid4
 
@@ -46,7 +47,7 @@ from .error_codes import error_code, http_status
 from .exceptions import AuthenticationFailed, ChatAgentsError, ProtocolError
 from .llm.effort import EffortTier
 from .llm.errors import ProfileUnavailableError
-from .llm.model_discovery import ModelDiscoveryService
+from .llm.model_discovery import ModelDiscoveryService, model_discovery_lifespan
 from .llm.profile import EndpointProfile
 from .llm.resolve import resolve_profiles
 from .llm.server_config import build_available_profiles, load_server_endpoints
@@ -60,7 +61,20 @@ from .transport.sse import encode_sse
 configure_logging()
 logger = structlog.get_logger(__name__)
 
-app = FastAPI(title="ChatAgents")
+
+@asynccontextmanager
+async def _app_lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """管理模型清单 24 小时刷新任务的生命周期。"""
+
+    settings = Settings()
+    config = load_server_endpoints(settings.endpoints_config_path)
+    store = SqlAlchemyModelCatalogStore(get_session_factory())
+    service = ModelDiscoveryService(store, server_config=config)
+    async with model_discovery_lifespan(service):
+        yield
+
+
+app = FastAPI(title="ChatAgents", lifespan=_app_lifespan)
 app.include_router(conversation_router)
 app.include_router(observability_router)
 
