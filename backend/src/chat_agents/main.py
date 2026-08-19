@@ -45,6 +45,7 @@ from .conversation.streaming import persist
 from .database import get_session_factory
 from .db.model_catalog import SqlAlchemyModelCatalogStore
 from .error_codes import error_code, http_status
+from .eval_summary.router import router as eval_summary_router
 from .exceptions import AuthenticationFailed, ChatAgentsError, ProtocolError
 from .llm.effort import EffortTier
 from .llm.errors import ProfileUnavailableError
@@ -79,6 +80,7 @@ async def _app_lifespan(_app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="ChatAgents", lifespan=_app_lifespan)
 app.include_router(conversation_router)
 app.include_router(observability_router)
+app.include_router(eval_summary_router)
 
 
 def _custom_openapi() -> dict[str, Any]:

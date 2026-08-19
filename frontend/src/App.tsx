@@ -1,5 +1,6 @@
 import { NavLink, Navigate, Route, Routes } from "react-router-dom";
 
+import { EvalsPage } from "./features/evals/EvalsPage";
 import { SessionPage } from "./features/session/SessionPage";
 
 function Shell() {
@@ -21,9 +22,15 @@ function Shell() {
         <Routes>
           <Route path="/" element={<LandingPage />} />
           <Route path="/s/:sessionId" element={<SessionPage />} />
+          <Route path="/evals" element={<EvalsPage />} />
           <Route path="*" element={<Navigate replace to="/" />} />
         </Routes>
       </main>
+      <footer className="site-footer">
+        <NavLink className="text-button" to="/evals">
+          评测数据
+        </NavLink>
+      </footer>
     </div>
   );
 }
