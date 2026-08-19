@@ -5,6 +5,7 @@ import type { components } from "../../generated/api";
 type RunRequest = components["schemas"]["RunRequest"];
 type ProblemDetails = components["schemas"]["ProblemDetails"];
 type UsagePayload = components["schemas"]["ChatAgentsUsagePayload"];
+type TitlePayload = components["schemas"]["ChatAgentsTitlePayload"];
 
 interface RunStreamHandlers {
   onTextDelta(delta: string): void;
@@ -12,6 +13,7 @@ interface RunStreamHandlers {
   onToolStarted(toolCallId: string, name: string): void;
   onToolEnded(toolCallId: string): void;
   onUsage(payload: UsagePayload): void;
+  onTitleGenerated(sessionId: string, title: string): void;
   onRunFinished(): void;
   onRunError(message: string): void;
 }
@@ -82,6 +84,9 @@ function dispatch(envelope: RunEnvelope, handlers: RunStreamHandlers): void {
     case "CUSTOM":
       if (envelope.name === "chatagents.usage") {
         handlers.onUsage(envelope.value as UsagePayload);
+      } else if (envelope.name === "chatagents.title") {
+        const payload = envelope.value as TitlePayload;
+        handlers.onTitleGenerated(payload.session_id, payload.title);
       }
       break;
     case "RUN_FINISHED":

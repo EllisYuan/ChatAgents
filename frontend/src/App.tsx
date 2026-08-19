@@ -1,11 +1,19 @@
 import { useMemo } from "react";
-import { NavLink, Navigate, Route, Routes } from "react-router-dom";
+import { NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
 
 import { EvalsPage } from "./features/evals/EvalsPage";
 import { SessionPage } from "./features/session/SessionPage";
+import { SessionSidebar } from "./features/sessions/SessionSidebar";
 import { uuidv7 } from "./utils/uuid";
 
 function Shell() {
+  const location = useLocation();
+  // 侧边栏高亮当前会话——Shell 在 Routes 之外，读不到 useParams，从路径里取。
+  const activeSessionId = useMemo(() => {
+    const match = /^\/s\/([^/]+)/.exec(location.pathname);
+    return match ? decodeURIComponent(match[1]) : null;
+  }, [location.pathname]);
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -20,14 +28,17 @@ function Shell() {
           <span>LOCAL / READY</span>
         </div>
       </header>
-      <main className="route-stage">
-        <Routes>
-          <Route path="/" element={<LandingPage />} />
-          <Route path="/s/:sessionId" element={<SessionPage />} />
-          <Route path="/evals" element={<EvalsPage />} />
-          <Route path="*" element={<Navigate replace to="/" />} />
-        </Routes>
-      </main>
+      <div className="app-body">
+        <SessionSidebar activeSessionId={activeSessionId} />
+        <main className="route-stage">
+          <Routes>
+            <Route path="/" element={<LandingPage />} />
+            <Route path="/s/:sessionId" element={<SessionPage />} />
+            <Route path="/evals" element={<EvalsPage />} />
+            <Route path="*" element={<Navigate replace to="/" />} />
+          </Routes>
+        </main>
+      </div>
       <footer className="site-footer">
         <NavLink className="text-button" to="/evals">
           评测数据

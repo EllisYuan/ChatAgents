@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { getSessionDetail } from "../../api/client";
+import { useSessionListStore } from "../../stores/session-list-store";
 import { streamRun } from "./agui-stream";
 import type { ChatMessage, RunSummary } from "./chat-types";
 import { historyToMessages } from "./history";
@@ -59,6 +60,10 @@ export function useAgentRun(sessionId: string) {
       setActiveTool(null);
       setErrors((prev) => omit(prev, assistantId));
 
+      // 会话随第一条用户消息诞生（ADR-0013）：这里让侧边栏立刻看到这一行，
+      // 标题淡入替换前先落「新会话」骨架微光（issue #68）。
+      useSessionListStore.getState().touchDraft(sessionId);
+
       const controller = new AbortController();
       abortRef.current = controller;
 
@@ -99,6 +104,9 @@ export function useAgentRun(sessionId: string) {
                 (payload.output_tokens ?? 0) +
                 (payload.reasoning_tokens ?? 0);
             },
+            onTitleGenerated(titleSessionId, title) {
+              useSessionListStore.getState().applyTitle(titleSessionId, title);
+            },
             onRunFinished() {
               finished = true;
             },
@@ -127,6 +135,8 @@ export function useAgentRun(sessionId: string) {
       setActiveTool(null);
       setPhase("idle");
       setStreamingId(null);
+      // 运行收尾（无论正常/出错/断连）都向后端要回权威的标题与消息数，不做客户端估算。
+      void useSessionListStore.getState().refreshSession(sessionId);
       const disconnected = !finished && !failed;
       setSummaries((prev) => ({
         ...prev,
