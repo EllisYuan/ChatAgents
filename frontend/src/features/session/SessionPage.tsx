@@ -1,19 +1,29 @@
-import { useQuery } from "@tanstack/react-query";
+import { type FormEvent, useState } from "react";
 import { useParams } from "react-router-dom";
 
-import { getModels } from "../../api/client";
 import { TraceSkeleton } from "../trace/TraceSkeleton";
 import { useUiStore } from "../../stores/ui-store";
+import { SummaryLine } from "./SummaryLine";
+import { useAgentRun } from "./useAgentRun";
 
 export function SessionPage() {
-  const { sessionId = "unknown" } = useParams<{ sessionId: string }>();
+  const { sessionId = "" } = useParams<{ sessionId: string }>();
   const inspectorOpen = useUiStore((state) => state.inspectorOpen);
   const toggleInspector = useUiStore((state) => state.toggleInspector);
-  const modelsQuery = useQuery({
-    queryKey: ["models"],
-    queryFn: getModels,
-    enabled: false,
-  });
+  const { messages, historyLoaded, phase, streamingId, summaries, errors, activeTool, sendMessage } =
+    useAgentRun(sessionId);
+  const [draft, setDraft] = useState("");
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!draft.trim() || phase === "streaming") {
+      return;
+    }
+    void sendMessage(draft);
+    setDraft("");
+  };
+
+  const isEmpty = historyLoaded && messages.length === 0;
 
   return (
     <section className="session-page" aria-labelledby="session-title">
@@ -30,20 +40,72 @@ export function SessionPage() {
       <div className={`session-grid${inspectorOpen ? "" : " session-grid--focus"}`}>
         <article className="conversation-card">
           <div className="card-meta">
-            <span className="signal-chip">SESSION READY</span>
+            <span className="signal-chip">{phase === "streaming" ? "RUN LIVE" : "SESSION READY"}</span>
             <span className="mono">{sessionId}</span>
           </div>
-          <div className="empty-conversation">
-            <span className="empty-index">00</span>
-            <div>
-              <h2>从一个问题开始</h2>
-              <p>消息、工具与模型轨迹会在这里汇合。</p>
+
+          {isEmpty ? (
+            <div className="empty-conversation">
+              <span className="empty-index">00</span>
+              <div>
+                <h2>从一个问题开始</h2>
+                <p>消息、工具与模型轨迹会在这里汇合。</p>
+              </div>
             </div>
-          </div>
-          <div className="composer-placeholder" aria-label="消息输入区占位">
-            <span>Ask the agent something precise…</span>
-            <span className="composer-key">⌘ ↵</span>
-          </div>
+          ) : (
+            <ol className="chat-thread">
+              {messages.map((message) => (
+                <li key={message.id} className={`chat-turn chat-turn--${message.role}`}>
+                  <span className="chat-turn-role">{message.role === "user" ? "YOU" : "AGENT"}</span>
+                  <p className="chat-turn-text">
+                    {message.text || (message.id === streamingId ? "…" : "")}
+                  </p>
+                  {message.role === "assistant" && message.id === streamingId && activeTool && (
+                    <p className="chat-tool-note">▸ 使用工具 {activeTool}</p>
+                  )}
+                  {message.role === "assistant" && errors[message.id] && (
+                    <p className="chat-error" role="alert">
+                      运行出错：{errors[message.id]}
+                    </p>
+                  )}
+                  {message.role === "assistant" && (
+                    <SummaryLine
+                      pending={message.id === streamingId}
+                      summary={summaries[message.id]}
+                    />
+                  )}
+                </li>
+              ))}
+            </ol>
+          )}
+
+          <form className="composer" onSubmit={handleSubmit} aria-label="发送消息">
+            <textarea
+              className="composer-input"
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  handleSubmit(event as unknown as FormEvent<HTMLFormElement>);
+                }
+              }}
+              placeholder="Ask the agent something precise…"
+              maxLength={32_000}
+              rows={2}
+              disabled={phase === "streaming"}
+            />
+            <button
+              className="composer-submit"
+              type="submit"
+              disabled={phase === "streaming" || !draft.trim()}
+            >
+              {phase === "streaming" ? "运行中…" : "发送"}
+              <span className="composer-key" aria-hidden="true">
+                ⌘ ↵
+              </span>
+            </button>
+          </form>
           <TraceSkeleton />
         </article>
 
@@ -51,12 +113,12 @@ export function SessionPage() {
           <aside className="inspector-card" aria-label="运行 inspector">
             <div className="card-meta">
               <span className="eyebrow">INSPECTOR</span>
-              <span className="live-label">● IDLE</span>
+              <span className="live-label">{phase === "streaming" ? "● LIVE" : "● IDLE"}</span>
             </div>
             <div className="inspector-body">
               <div className="metric-row">
-                <span>MODEL</span>
-                <strong>等待选择</strong>
+                <span>MESSAGES</span>
+                <strong>{messages.length}</strong>
               </div>
               <div className="metric-row">
                 <span>TRACE NODES</span>
@@ -67,15 +129,6 @@ export function SessionPage() {
                 <strong>—</strong>
               </div>
             </div>
-            <button
-              className="inspector-link"
-              type="button"
-              onClick={() => void modelsQuery.refetch()}
-              disabled={modelsQuery.isFetching}
-            >
-              {modelsQuery.isFetching ? "同步中…" : "检查模型清单"}
-              <span aria-hidden="true">↗</span>
-            </button>
           </aside>
         )}
       </div>

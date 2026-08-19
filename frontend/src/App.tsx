@@ -1,7 +1,9 @@
+import { useMemo } from "react";
 import { NavLink, Navigate, Route, Routes } from "react-router-dom";
 
 import { EvalsPage } from "./features/evals/EvalsPage";
 import { SessionPage } from "./features/session/SessionPage";
+import { uuidv7 } from "./utils/uuid";
 
 function Shell() {
   return (
@@ -36,6 +38,10 @@ function Shell() {
 }
 
 function LandingPage() {
+  // 会话随第一条用户消息诞生（issue #65）：这里只生成路由用的 UUIDv7，不创建
+  // 任何后端记录——真正的会话行要等用户发出第一条消息时由 upsert 产生。
+  const draftSessionId = useMemo(() => uuidv7(), []);
+
   return (
     <section className="landing-page" aria-labelledby="landing-title">
       <p className="eyebrow">OBSERVABILITY / CHAT SURFACE</p>
@@ -46,8 +52,8 @@ function LandingPage() {
       <p className="landing-copy">
         一个面向 agent run 的工作台。输入 session link，进入对话、工具调用与 trace 的同一条时间线。
       </p>
-      <NavLink className="primary-action" to="/s/00000000-0000-0000-0000-000000000000">
-        <span>打开 session 骨架</span>
+      <NavLink className="primary-action" to={`/s/${draftSessionId}`}>
+        <span>开始新会话</span>
         <span aria-hidden="true">↗</span>
       </NavLink>
       <div className="landing-index" aria-hidden="true">

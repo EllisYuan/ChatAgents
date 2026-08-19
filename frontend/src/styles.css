@@ -65,7 +65,6 @@ h1 span { display: block; color: var(--warm); font-style: italic; }
 .empty-index { color: var(--warm); font-size: 0.72rem; letter-spacing: 0.12em; }
 .empty-conversation h2 { margin-bottom: 0.7rem; color: var(--ink); font-family: Georgia, "Times New Roman", serif; font-size: clamp(2rem, 4vw, 3.4rem); font-weight: 400; letter-spacing: -0.05em; }
 .empty-conversation p { color: var(--muted); font-family: Georgia, "Times New Roman", serif; font-size: 1rem; }
-.composer-placeholder { display: flex; align-items: center; justify-content: space-between; gap: 1rem; border-top: 1px solid var(--line); padding-top: 1rem; color: #68716c; font-size: 0.72rem; }
 .composer-key { border: 1px solid var(--line); padding: 0.35rem 0.5rem; color: var(--muted); white-space: nowrap; }
 .trace-skeleton { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; border-top: 1px dashed var(--line); margin-top: 2rem; padding-top: 1rem; color: var(--muted); font-size: 0.68rem; }
 .trace-skeleton .eyebrow { margin: 0; font-size: 0.58rem; }
@@ -76,6 +75,22 @@ h1 span { display: block; color: var(--warm); font-style: italic; }
 .metric-row { display: flex; justify-content: space-between; gap: 1rem; border-top: 1px solid var(--line); padding: 0.8rem 0; color: var(--muted); font-size: 0.62rem; letter-spacing: 0.08em; }
 .metric-row strong { color: var(--ink); font-weight: 400; text-align: right; }
 .inspector-link { display: flex; width: 100%; align-items: center; justify-content: space-between; border: 0; border-top: 1px solid var(--line); padding: 1rem 0 0; background: transparent; color: var(--signal); font-size: 0.68rem; text-align: left; }
+.chat-thread { display: flex; flex-direction: column; gap: 1.8rem; padding: 1rem 0 2.5rem; list-style: none; margin: 0; }
+.chat-turn { border-top: 1px solid var(--line); padding-top: 1rem; }
+.chat-turn-role { color: var(--warm); font-size: 0.6rem; letter-spacing: 0.14em; }
+.chat-turn-text { margin: 0.5rem 0 0; color: var(--ink); font-family: Georgia, "Times New Roman", serif; font-size: 1.05rem; line-height: 1.6; white-space: pre-wrap; }
+.chat-turn--user .chat-turn-role { color: var(--muted); }
+.chat-tool-note { margin: 0.6rem 0 0; color: var(--muted); font-size: 0.68rem; letter-spacing: 0.04em; }
+.chat-error { margin: 0.6rem 0 0; color: var(--warm); font-size: 0.7rem; }
+.run-summary { margin: 0.7rem 0 0; color: var(--muted); font-size: 0.66rem; letter-spacing: 0.04em; }
+.run-summary--pending { opacity: 0.6; }
+.run-summary-marker { color: var(--signal); }
+.composer { display: flex; align-items: flex-end; gap: 1rem; border-top: 1px solid var(--line); padding-top: 1rem; }
+.composer-input { flex: 1; resize: none; border: 0; background: transparent; color: var(--ink); font: inherit; font-size: 0.9rem; line-height: 1.5; }
+.composer-input::placeholder { color: #68716c; }
+.composer-input:disabled { opacity: 0.5; }
+.composer-submit { display: inline-flex; align-items: center; gap: 0.6rem; border: 1px solid var(--line); padding: 0.55rem 0.8rem; background: transparent; color: var(--signal); font-size: 0.68rem; letter-spacing: 0.04em; white-space: nowrap; transition: border-color 160ms ease; }
+.composer-submit:hover:not(:disabled) { border-color: var(--signal); }
 .site-footer { display: flex; justify-content: flex-end; max-width: 1240px; margin: 0 auto; padding: 1.5rem 0 0; }
 .evals-page { padding: clamp(3rem, 8vw, 6rem) 0; animation: rise-in 500ms ease both; }
 .evals-page h1 { max-width: 12ch; font-size: clamp(2.7rem, 6vw, 5rem); }

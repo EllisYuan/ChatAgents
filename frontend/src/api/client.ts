@@ -1,4 +1,4 @@
-import type { paths } from "../generated/api";
+import type { components, paths } from "../generated/api";
 
 type ModelsResponse =
   paths["/api/models"]["get"]["responses"][200]["content"]["application/json"];
@@ -21,4 +21,18 @@ export async function getEvalSummary(): Promise<EvalSummary> {
     throw new Error(`获取评测展示数据失败：${response.status}`);
   }
   return (await response.json()) as EvalSummary;
+}
+
+export type SessionDetail = components["schemas"]["SessionDetail"];
+
+/** 会话随第一条用户消息诞生——尚未产生消息的会话在后端不存在，404 按空历史处理。 */
+export async function getSessionDetail(sessionId: string): Promise<SessionDetail | null> {
+  const response = await fetch(`/api/sessions/${sessionId}`);
+  if (response.status === 404) {
+    return null;
+  }
+  if (!response.ok) {
+    throw new Error(`获取会话历史失败：${response.status}`);
+  }
+  return (await response.json()) as SessionDetail;
 }
