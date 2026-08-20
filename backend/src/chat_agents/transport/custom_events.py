@@ -11,7 +11,7 @@ AG-UI 的 `CustomEvent` 只约束信封 `{name, value}`，`value` 是 `Any`—�
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -42,13 +42,18 @@ class ToolResultPayload(BaseModel):
     """`chatagents.tool_result`——渲染文本走 `TOOL_CALL_RESULT`，结构化走这里。
 
     `result` 与 `TOOL_CALL_RESULT.content` 同源（`ToolFinished.result`）——
-    外部失败已由 `ToolExecutor` 编码进这段文本本身；`agent.events.ToolFinished`
-    没有单独的错误标记字段，这里也就没有——建一个凭空猜的布尔值比没有更误导人。
+    外部失败已由 `ToolExecutor` 编码进这段文本本身。
+
+    `structured` 与 `ToolFinished.structured` 同源，只在真正跑通时有值
+    （issue #69）：耗尽重试的外部失败恒为 `None`——这不是猜出来的错误标记，
+    是「有没有产出结构化结果」这件事本身的如实反映。工具结果卡片（标题/
+    供应商域名/相关性分等）就靠这个字段渲染。
     """
 
     tool_call_id: str
     result: str
     duration_ms: int
+    structured: dict[str, Any] | None
 
 
 class TitlePayload(BaseModel):

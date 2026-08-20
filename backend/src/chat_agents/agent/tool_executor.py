@@ -32,9 +32,14 @@ class ToolCallStarted:
 
 @dataclass(frozen=True, slots=True)
 class ToolCallFinished:
+    """``structured`` 只在真正跑通时有值——耗尽重试的外部失败没有结构化结果
+    可言，如实传 ``None``（issue #69），不编一个假的。
+    """
+
     tool_call_id: str
     name: str
     result: str
+    structured: dict[str, Any] | None
 
 
 ToolCallLifecycleEvent = ToolCallStarted | ToolCallFinished
@@ -81,31 +86,39 @@ class ToolExecutor:
         parallel_calls = [call for call in calls if self.is_parallelizable(call.name)]
         serial_calls = [call for call in calls if not self.is_parallelizable(call.name)]
 
-        async def _run(call: ToolCallBlock) -> tuple[ToolCallBlock, str]:
-            return call, await self.execute(call.name, call.arguments, ctx)
+        async def _run(call: ToolCallBlock) -> tuple[ToolCallBlock, str, dict[str, Any] | None]:
+            text, structured = await self.execute(call.name, call.arguments, ctx)
+            return call, text, structured
 
         if parallel_calls:
             for call in parallel_calls:
                 yield ToolCallStarted(
                     tool_call_id=call.id, name=call.name, arguments=call.arguments
                 )
-            for call, text in await asyncio.gather(*(_run(call) for call in parallel_calls)):
-                yield ToolCallFinished(tool_call_id=call.id, name=call.name, result=text)
+            for call, text, structured in await asyncio.gather(
+                *(_run(call) for call in parallel_calls)
+            ):
+                yield ToolCallFinished(
+                    tool_call_id=call.id, name=call.name, result=text, structured=structured
+                )
 
         for call in serial_calls:
             yield ToolCallStarted(tool_call_id=call.id, name=call.name, arguments=call.arguments)
-            _, text = await _run(call)
-            yield ToolCallFinished(tool_call_id=call.id, name=call.name, result=text)
+            _, text, structured = await _run(call)
+            yield ToolCallFinished(
+                tool_call_id=call.id, name=call.name, result=text, structured=structured
+            )
 
     async def execute(
         self,
         name: str,
         arguments: dict[str, Any],
         ctx: RunToolContext,
-    ) -> str:
-        """执行一次工具调用，返回渲染给模型的文本。
+    ) -> tuple[str, dict[str, Any] | None]:
+        """执行一次工具调用，返回渲染给模型的文本与结构化结果。
 
-        外部失败（含重试耗尽）不抛异常，文本本身就是交回模型的结果。
+        外部失败（含重试耗尽）不抛异常，文本本身就是交回模型的结果，结构化
+        结果如实为 ``None``（issue #69：没有猜测出来的结构化数据）。
         程序错误抛出 :class:`ToolProgramError`，由调用方中止运行。
         """
         spec = self._specs.get(name)
@@ -136,10 +149,10 @@ class ToolExecutor:
                 raise ToolProgramError(f"{name} 执行失败: {exc}") from exc
             else:
                 span.finish_ok(result.structured)
-                return str(result.model_text)
+                return str(result.model_text), result.structured
 
             if attempt < attempts:
                 await asyncio.sleep(_backoff_seconds(attempt))
 
         assert last_failure is not None
-        return str(last_failure.model_text)
+        return str(last_failure.model_text), None

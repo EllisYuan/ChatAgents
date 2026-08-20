@@ -61,6 +61,12 @@ def title_span_id(run_id: str) -> UUID:
     return uuid5(_run_namespace(run_id), "title:span")
 
 
+def tool_span_id(run_id: str, tool_call_id: str) -> UUID:
+    """为一次工具调用派生稳定的跨度标识（issue #69：工具跨度持久化）。"""
+
+    return uuid5(_run_namespace(run_id), f"tool:{tool_call_id}")
+
+
 @dataclass(frozen=True, slots=True)
 class IterationStarted:
     """一次迭代边界及本次运行采用的输入配置版本指代。"""
@@ -139,11 +145,17 @@ class ToolStarted:
 
 @dataclass(frozen=True, slots=True)
 class ToolFinished:
+    """``structured`` 与 ``chatagents.tool_result`` 的 ``structured`` 字段同源
+    （issue #69）：真正跑通的工具调用才会产出它，耗尽重试的外部失败恒为
+    ``None``——不是缺失标记，是结构性事实，观测层据此判定跨度 ``status``。
+    """
+
     run_id: str
     iteration: int
     tool_call_id: str
     name: str
     result: str
+    structured: dict[str, Any] | None
 
 
 @dataclass(frozen=True, slots=True)

@@ -28,12 +28,15 @@ def _override_db(factory: async_sessionmaker[AsyncSession]):
     return dependency
 
 
-async def _seed_observation(factory: async_sessionmaker[AsyncSession]) -> tuple[Any, Any, Any]:
+async def _seed_observation(
+    factory: async_sessionmaker[AsyncSession],
+) -> tuple[Any, Any, Any, Any]:
     session_id = uuid4()
     trigger_id = uuid4()
     run_id = uuid4()
     root_id = uuid4()
     child_id = uuid4()
+    tool_id = uuid4()
     now = datetime.now(UTC)
     async with factory() as session, session.begin():
         session.add(SessionRow(id=session_id))
@@ -123,7 +126,31 @@ async def _seed_observation(factory: async_sessionmaker[AsyncSession]) -> tuple[
                 ended_at=now + timedelta(seconds=4),
             )
         )
-    return session_id, run_id, child_id
+        session.add(
+            Span(
+                id=tool_id,
+                run_id=run_id,
+                parent_span_id=root_id,
+                name="web_search",
+                kind="tool",
+                status="ok",
+                role=None,
+                model=None,
+                input_tokens=None,
+                output_tokens=None,
+                usage_status=None,
+                reasoning_tokens=None,
+                attributes={
+                    "tool_call_id": "call-1",
+                    "arguments": {"query": "事实"},
+                    "result": "找到了",
+                    "structured": {"result_count": 1},
+                },
+                started_at=now + timedelta(seconds=1, milliseconds=500),
+                ended_at=now + timedelta(seconds=2),
+            )
+        )
+    return session_id, run_id, child_id, tool_id
 
 
 @pytest.mark.db
@@ -131,7 +158,7 @@ def test_run_list_is_three_field_observation_skeleton() -> None:
     async def scenario() -> None:
         async with migrated_engine("chat_agents_obs_list") as engine:
             factory = session_factory_for(engine)
-            session_id, _, _ = await _seed_observation(factory)
+            session_id, _, _, _ = await _seed_observation(factory)
             main_module.app.dependency_overrides[get_db] = _override_db(factory)
             try:
                 transport = httpx.ASGITransport(app=main_module.app)
@@ -152,7 +179,7 @@ def test_run_detail_returns_tree_aggregates_and_protocol_specific_fields() -> No
     async def scenario() -> None:
         async with migrated_engine("chat_agents_obs_detail") as engine:
             factory = session_factory_for(engine)
-            _, run_id, child_id = await _seed_observation(factory)
+            _, run_id, child_id, tool_id = await _seed_observation(factory)
             main_module.app.dependency_overrides[get_db] = _override_db(factory)
             try:
                 transport = httpx.ASGITransport(app=main_module.app)
@@ -205,5 +232,16 @@ def test_run_detail_returns_tree_aggregates_and_protocol_specific_fields() -> No
             )
             partial_span = next(span for span in roots if span["name"] == "partial_call")
             assert partial_span["usage_status"] == "partial"
+
+            tool_span = next(span for span in main_span["children"] if span["kind"] == "tool")
+            assert tool_span["id"] == str(tool_id)
+            assert tool_span["status"] == "ok"
+            assert tool_span["arguments"] == {"query": "事实"}
+            assert tool_span["tool_result"] == {
+                "result": "找到了",
+                "structured": {"result_count": 1},
+            }
+            assert "arguments" not in main_span
+            assert "tool_result" not in main_span
 
     asyncio.run(scenario())

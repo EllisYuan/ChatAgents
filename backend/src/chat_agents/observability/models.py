@@ -38,6 +38,17 @@ class DisplaySummary(BaseModel):
     status: Literal["available", "aged_out"]
 
 
+class ToolResultView(BaseModel):
+    """工具跨度的结果，供历史视图重建工具结果卡片（issue #69）。
+
+    只在 ``kind == "tool"`` 的跨度上出现——结构性不存在的字段根本不出现
+    （ADR-0023），不用 ``None`` 冒充「这条工具调用没有结果」。
+    """
+
+    result: str
+    structured: dict[str, Any] | None
+
+
 class SpanView(BaseModel):
     """跨度节点及其递归子节点。"""
 
@@ -55,6 +66,8 @@ class SpanView(BaseModel):
     usage_status: UsageState | None
     reasoning_tokens: int | None = None
     display_summary: DisplaySummary | None = None
+    arguments: dict[str, Any] | None = None
+    tool_result: ToolResultView | None = None
     started_at: datetime
     ended_at: datetime | None
     children: list[SpanView]
@@ -91,6 +104,10 @@ def _span_payload(span: SpanView) -> dict[str, Any]:
         payload.pop("reasoning_tokens", None)
     if span.display_summary is None:
         payload.pop("display_summary", None)
+    if span.arguments is None:
+        payload.pop("arguments", None)
+    if span.tool_result is None:
+        payload.pop("tool_result", None)
     return payload
 
 

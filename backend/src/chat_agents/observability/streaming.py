@@ -21,8 +21,11 @@ from ..agent.events import (
     RunFailed,
     TitleGenerated,
     TitleGenerationStarted,
+    ToolFinished,
+    ToolStarted,
     llm_span_id,
     title_span_id,
+    tool_span_id,
 )
 from .reasoning import reasoning_attributes
 from .writer import RunWriter
@@ -67,12 +70,14 @@ async def observe(
     session_factory: Any,
     expect_title: bool = False,
 ) -> AsyncIterator[RunEvent]:
-    """透传事件，并记录主模型与 auxiliary 标题的兄弟跨度。"""
+    """透传事件，并记录主模型跨度、auxiliary 标题兄弟跨度、以及挂在当前迭代
+    模型跨度下的工具跨度（issue #69）。"""
 
     writer = RunWriter(session_factory=session_factory)
     run_id: str | None = None
     main_span_open: UUID | None = None
     title_span_open: UUID | None = None
+    tool_spans_open: dict[str, UUID] = {}
     main_terminal = False
     main_status: Literal["completed", "failed"] = "completed"
     title_terminal = not expect_title
@@ -158,6 +163,44 @@ async def observe(
                 )
                 main_span_open = None
 
+            elif isinstance(event, ToolStarted):
+                span_id = tool_span_id(run_id, event.tool_call_id)
+                tool_spans_open[event.tool_call_id] = span_id
+                await writer.open_span(
+                    span_id=span_id,
+                    run_id=run_id,
+                    parent_span_id=main_span_open,
+                    name=event.name,
+                    kind="tool",
+                    role=None,
+                    model=None,
+                    attributes={
+                        "tool_call_id": event.tool_call_id,
+                        "arguments": event.arguments,
+                    },
+                )
+
+            elif isinstance(event, ToolFinished):
+                span_id = tool_spans_open.get(event.tool_call_id)
+                if span_id is not None:
+                    del tool_spans_open[event.tool_call_id]
+                    # 只有真正跑通的工具调用才会产出 structured；耗尽重试的外部
+                    # 失败恒为 None——status 由这条结构性事实判定，不是猜测。
+                    await writer.close_span(
+                        span_id=span_id,
+                        run_id=run_id,
+                        status="ok" if event.structured is not None else "error",
+                        usage_status=None,
+                        input_tokens=None,
+                        output_tokens=None,
+                        reasoning_tokens=None,
+                        attributes={
+                            "tool_call_id": event.tool_call_id,
+                            "result": event.result,
+                            "structured": event.structured,
+                        },
+                    )
+
             elif isinstance(event, TitleGenerated):
                 title_terminal = True
                 if title_span_open is not None:
@@ -190,6 +233,9 @@ async def observe(
                 if main_span_open is not None:
                     await _close_partial_span(writer, span_id=main_span_open, run_id=run_id)
                     main_span_open = None
+                for open_span_id in tool_spans_open.values():
+                    await _close_partial_span(writer, span_id=open_span_id, run_id=run_id)
+                tool_spans_open.clear()
                 if title_terminal:
                     await writer.finish_run(run_id=run_id, status="failed")
                     terminal = True
@@ -202,6 +248,9 @@ async def observe(
                 await _close_partial_span(writer, span_id=main_span_open, run_id=run_id)
             if title_span_open is not None:
                 await _close_partial_span(writer, span_id=title_span_open, run_id=run_id)
+            for open_span_id in tool_spans_open.values():
+                await _close_partial_span(writer, span_id=open_span_id, run_id=run_id)
+            tool_spans_open.clear()
             await writer.finish_run(run_id=run_id, status="failed")
             terminal = True
         raise
@@ -211,4 +260,7 @@ async def observe(
                 await _close_partial_span(writer, span_id=main_span_open, run_id=run_id)
             if title_span_open is not None:
                 await _close_partial_span(writer, span_id=title_span_open, run_id=run_id)
+            for open_span_id in tool_spans_open.values():
+                await _close_partial_span(writer, span_id=open_span_id, run_id=run_id)
+            tool_spans_open.clear()
             await writer.finish_run(run_id=run_id, status="aborted")

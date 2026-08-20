@@ -81,6 +81,7 @@ def test_persist_writes_each_iteration_and_grouped_tool_message() -> None:
                         tool_call_id="call-1",
                         name="search",
                         result="result text",
+                        structured=None,
                     ),
                     IterationStarted(run_id=RUN_ID, iteration=2),
                     IterationCompleted(

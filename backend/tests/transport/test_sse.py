@@ -152,6 +152,7 @@ def test_tool_round_trip_emits_both_result_outlets() -> None:
                     tool_call_id="call-1",
                     name="web_search",
                     result="found it",
+                    structured={"result_count": 1},
                 ),
                 RunFailed(run_id=RUN_ID, iteration=2, reason="stopped"),
             ]
@@ -169,6 +170,7 @@ def test_tool_round_trip_emits_both_result_outlets() -> None:
     assert tool_result_value["result"] == "found it"
     assert isinstance(tool_result_value["duration_ms"], int)
     assert tool_result_value["duration_ms"] >= 0
+    assert tool_result_value["structured"] == {"result_count": 1}
     result_event = next(f for f in frames if f["type"] == "TOOL_CALL_RESULT")
     assert result_event["content"] == "found it"
     assert result_event["role"] == "tool"

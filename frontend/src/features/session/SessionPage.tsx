@@ -1,17 +1,26 @@
 import { type FormEvent, useState } from "react";
 import { useParams } from "react-router-dom";
 
-import { TraceSkeleton } from "../trace/TraceSkeleton";
+import { TracePanel } from "../trace/TracePanel";
 import { useUiStore } from "../../stores/ui-store";
-import { SummaryLine } from "./SummaryLine";
 import { useAgentRun } from "./useAgentRun";
 
 export function SessionPage() {
   const { sessionId = "" } = useParams<{ sessionId: string }>();
   const inspectorOpen = useUiStore((state) => state.inspectorOpen);
   const toggleInspector = useUiStore((state) => state.toggleInspector);
-  const { messages, historyLoaded, phase, streamingId, summaries, errors, activeTool, sendMessage } =
-    useAgentRun(sessionId);
+  const {
+    messages,
+    historyLoaded,
+    phase,
+    streamingId,
+    summaries,
+    errors,
+    activeTool,
+    traces,
+    runIdBySeq,
+    sendMessage,
+  } = useAgentRun(sessionId);
   const [draft, setDraft] = useState("");
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -69,9 +78,11 @@ export function SessionPage() {
                     </p>
                   )}
                   {message.role === "assistant" && (
-                    <SummaryLine
+                    <TracePanel
                       pending={message.id === streamingId}
                       summary={summaries[message.id]}
+                      liveTree={traces[message.id] ?? null}
+                      runId={message.seq !== null ? (runIdBySeq[message.seq] ?? null) : null}
                     />
                   )}
                 </li>
@@ -106,7 +117,6 @@ export function SessionPage() {
               </span>
             </button>
           </form>
-          <TraceSkeleton />
         </article>
 
         {inspectorOpen && (

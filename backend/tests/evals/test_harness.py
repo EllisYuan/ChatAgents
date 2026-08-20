@@ -169,6 +169,7 @@ def test_batch_evaluation_produces_exactly_seven_metrics_and_snapshot() -> None:
             tool_call_id="search-1",
             name="web_search",
             result="来源：https://example.test/a",
+            structured=None,
         ),
         ToolStarted(
             run_id="run-a",
@@ -183,6 +184,7 @@ def test_batch_evaluation_produces_exactly_seven_metrics_and_snapshot() -> None:
             tool_call_id="read-1",
             name="web_reader",
             result="https://example.test/a 的正文：事实成立",
+            structured=None,
         ),
         ReasoningDelta(
             run_id="run-a",
@@ -269,6 +271,7 @@ def test_deterministic_metrics_respond_to_violations() -> None:
                 tool_call_id="search",
                 name="web_search",
                 result="只观察到 https://example.test/a",
+                structured=None,
             ),
             RunCompleted(
                 run_id="run",

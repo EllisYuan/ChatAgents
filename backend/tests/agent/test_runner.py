@@ -171,6 +171,7 @@ def test_full_run_message_tool_model_answer() -> None:
     tool_finished = next(e for e in events if isinstance(e, ToolFinished))
     assert tool_started.name == "search"
     assert tool_finished.result == "search 的结果"
+    assert tool_finished.structured == {"tool": "search"}
 
     # 第二次模型调用的输入序列里带上了第一轮的助手消息与工具结果消息。
     assert [m.role for m in port.calls[1]["messages"]] == ["user", "assistant", "tool"]

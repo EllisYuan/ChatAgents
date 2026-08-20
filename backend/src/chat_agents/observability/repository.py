@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db.obs import Run, Span
 from ..llm.events import UsageState
-from .models import DisplaySummary, RunDetail, RunSummary, SpanView, UsageAggregate
+from .models import DisplaySummary, RunDetail, RunSummary, SpanView, ToolResultView, UsageAggregate
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,6 +80,23 @@ def _display_summary(attributes: dict[str, Any]) -> DisplaySummary | None:
     return DisplaySummary(text=None, status="aged_out") if aged else None
 
 
+def _tool_result(attributes: dict[str, Any]) -> ToolResultView | None:
+    """工具跨度的结果视图——只在真有 ``result`` 记录时出现（issue #69）。"""
+
+    result = attributes.get("result")
+    if not isinstance(result, str):
+        return None
+    structured = attributes.get("structured")
+    return ToolResultView(
+        result=result, structured=structured if isinstance(structured, dict) else None
+    )
+
+
+def _arguments(attributes: dict[str, Any]) -> dict[str, Any] | None:
+    arguments = attributes.get("arguments")
+    return arguments if isinstance(arguments, dict) else None
+
+
 def _span_view(span: Span, children: list[SpanView]) -> SpanView:
     view = SpanView(
         id=span.id,
@@ -94,6 +111,8 @@ def _span_view(span: Span, children: list[SpanView]) -> SpanView:
         usage_status=cast(UsageState | None, span.usage_status),
         reasoning_tokens=span.reasoning_tokens,
         display_summary=_display_summary(span.attributes),
+        arguments=_arguments(span.attributes),
+        tool_result=_tool_result(span.attributes),
         started_at=span.started_at,
         ended_at=span.ended_at,
         children=children,

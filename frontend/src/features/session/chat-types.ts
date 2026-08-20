@@ -4,6 +4,8 @@ export interface ChatMessage {
   id: string;
   role: ChatRole;
   text: string;
+  /** 持久化历史消息的序号；直播中新产出的消息还没有 seq，为 `null`（issue #69：trace 面板按它匹配运行）。 */
+  seq: number | null;
 }
 
 /**

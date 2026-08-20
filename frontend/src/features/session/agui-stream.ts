@@ -16,9 +16,17 @@ interface RunStreamHandlers {
   onTitleGenerated(sessionId: string, title: string): void;
   onRunFinished(): void;
   onRunError(message: string): void;
+  /**
+   * trace 面板专用的原始信封转发（issue #69）——`features/trace/live-merge.ts`
+   * 按 `envelope.type` 自己 pattern-match，这里不代它翻译语义，只转发这份合并
+   * 逻辑用得到的事件类型：`RUN_STARTED`、`STEP_STARTED/FINISHED`、
+   * `REASONING_*`、`TOOL_CALL_START/ARGS/END`、`CUSTOM chatagents.span` 与
+   * `chatagents.tool_result`。
+   */
+  onTraceEvent?(envelope: RunEnvelope): void;
 }
 
-interface RunEnvelope {
+export interface RunEnvelope {
   type: string;
   delta?: string;
   toolCallId?: string;
@@ -26,7 +34,25 @@ interface RunEnvelope {
   message?: string;
   name?: string;
   value?: unknown;
+  runId?: string;
+  stepName?: string;
+  messageId?: string;
 }
+
+const TRACE_EVENT_TYPES = new Set([
+  "RUN_STARTED",
+  "STEP_STARTED",
+  "STEP_FINISHED",
+  "REASONING_START",
+  "REASONING_MESSAGE_START",
+  "REASONING_MESSAGE_CONTENT",
+  "REASONING_MESSAGE_END",
+  "REASONING_END",
+  "TOOL_CALL_START",
+  "TOOL_CALL_ARGS",
+  "TOOL_CALL_END",
+  "CUSTOM",
+]);
 
 /**
  * 发起一次运行并消费 AG-UI over SSE 的事件流（issue #65）。
@@ -68,6 +94,9 @@ export async function streamRun(
 }
 
 function dispatch(envelope: RunEnvelope, handlers: RunStreamHandlers): void {
+  if (TRACE_EVENT_TYPES.has(envelope.type)) {
+    handlers.onTraceEvent?.(envelope);
+  }
   switch (envelope.type) {
     case "TEXT_MESSAGE_CONTENT":
       handlers.onTextDelta(envelope.delta ?? "");

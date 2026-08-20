@@ -292,7 +292,12 @@ async def encode_sse(
                         )
                     )
 
-                case ToolFinished(iteration=iteration, tool_call_id=tool_call_id, result=result):
+                case ToolFinished(
+                    iteration=iteration,
+                    tool_call_id=tool_call_id,
+                    result=result,
+                    structured=structured,
+                ):
                     started_at = tool_started_at.pop(tool_call_id, None)
                     tool_duration_ms = (
                         int((time.monotonic() - started_at) * 1000) if started_at is not None else 0
@@ -317,6 +322,7 @@ async def encode_sse(
                                 tool_call_id=tool_call_id,
                                 result=result,
                                 duration_ms=tool_duration_ms,
+                                structured=structured,
                             ).model_dump(),
                         )
                     )

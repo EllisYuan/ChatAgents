@@ -86,3 +86,24 @@ export async function renameSession(sessionId: string, title: string | null): Pr
   }
   return (await response.json()) as SessionView;
 }
+
+export type RunSummary = components["schemas"]["RunSummary"];
+export type RunDetail = components["schemas"]["RunDetail"];
+
+/** 观测侧运行骨架（ADR-0022：观测面与业务面分开），供前端按 `last_message_seq` 与消息 `seq` 客户端合并。 */
+export async function getSessionRuns(sessionId: string): Promise<RunSummary[]> {
+  const response = await fetch(`/api/sessions/${sessionId}/runs`);
+  if (!response.ok) {
+    throw new Error(`获取运行列表失败：${response.status}`);
+  }
+  return (await response.json()) as RunSummary[];
+}
+
+/** 单次运行的完整跨度树——trace 面板 Layer 1 历史视图懒加载的数据源（issue #69）。 */
+export async function getRunDetail(runId: string): Promise<RunDetail> {
+  const response = await fetch(`/api/runs/${runId}`);
+  if (!response.ok) {
+    throw new Error(`获取运行详情失败：${response.status}`);
+  }
+  return (await response.json()) as RunDetail;
+}

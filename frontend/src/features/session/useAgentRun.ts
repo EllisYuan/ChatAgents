@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { getSessionDetail } from "../../api/client";
+import { getSessionDetail, getSessionRuns } from "../../api/client";
 import { useSessionListStore } from "../../stores/session-list-store";
+import { useTraceStream } from "../trace/useTraceStream";
 import { streamRun } from "./agui-stream";
 import type { ChatMessage, RunSummary } from "./chat-types";
 import { historyToMessages } from "./history";
 
 type RunPhase = "idle" | "streaming";
+
+/** `last_message_seq -> run.id`，供 trace 面板给历史消息匹配运行（issue #69，ADR-0022）。 */
+type RunIdBySeq = Record<number, string>;
 
 /**
  * 一个会话的消息状态与运行流消费（issue #65：前端的 tracer bullet）。
@@ -22,6 +26,8 @@ export function useAgentRun(sessionId: string) {
   const [summaries, setSummaries] = useState<Record<string, RunSummary>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [activeTool, setActiveTool] = useState<string | null>(null);
+  const [runIdBySeq, setRunIdBySeq] = useState<RunIdBySeq>({});
+  const { trees: traces, startTrace, handleTraceEvent } = useTraceStream();
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -30,10 +36,25 @@ export function useAgentRun(sessionId: string) {
     setHistoryLoaded(false);
     setPhase("idle");
     setStreamingId(null);
+    setRunIdBySeq({});
     void getSessionDetail(sessionId).then((detail) => {
       if (cancelled) return;
       setMessages(detail ? historyToMessages(detail) : []);
       setHistoryLoaded(true);
+    });
+    // 观测侧独立请求（ADR-0022：一个 handler 只碰一个 schema）——运行骨架与
+    // 消息序号在客户端合并，不指望后端把两者揉进一个响应。
+    void getSessionRuns(sessionId).then((runs) => {
+      if (cancelled) return;
+      const bySeq: RunIdBySeq = {};
+      for (const run of runs) {
+        if (run.last_message_seq !== null) {
+          bySeq[run.last_message_seq] = run.id;
+        }
+      }
+      setRunIdBySeq(bySeq);
+    }, () => {
+      // 观测侧不可用不阻断聊天——trace 面板对这些历史消息就没有可展开的详情。
     });
     return () => {
       cancelled = true;
@@ -52,13 +73,14 @@ export function useAgentRun(sessionId: string) {
       const assistantId = crypto.randomUUID();
       setMessages((prev) => [
         ...prev,
-        { id: crypto.randomUUID(), role: "user", text: trimmed },
-        { id: assistantId, role: "assistant", text: "" },
+        { id: crypto.randomUUID(), role: "user", text: trimmed, seq: null },
+        { id: assistantId, role: "assistant", text: "", seq: null },
       ]);
       setPhase("streaming");
       setStreamingId(assistantId);
       setActiveTool(null);
       setErrors((prev) => omit(prev, assistantId));
+      startTrace(assistantId);
 
       // 会话随第一条用户消息诞生（ADR-0013）：这里让侧边栏立刻看到这一行，
       // 标题淡入替换前先落「新会话」骨架微光（issue #68）。
@@ -114,6 +136,9 @@ export function useAgentRun(sessionId: string) {
               failed = true;
               setErrors((prev) => ({ ...prev, [assistantId]: message }));
             },
+            onTraceEvent(envelope) {
+              handleTraceEvent(assistantId, envelope);
+            },
           },
           controller.signal,
         );
@@ -148,10 +173,21 @@ export function useAgentRun(sessionId: string) {
         },
       }));
     },
-    [phase, sessionId],
+    [phase, sessionId, startTrace, handleTraceEvent],
   );
 
-  return { messages, historyLoaded, phase, streamingId, summaries, errors, activeTool, sendMessage };
+  return {
+    messages,
+    historyLoaded,
+    phase,
+    streamingId,
+    summaries,
+    errors,
+    activeTool,
+    traces,
+    runIdBySeq,
+    sendMessage,
+  };
 }
 
 function omit<K extends string, V>(record: Record<K, V>, key: K): Record<K, V> {

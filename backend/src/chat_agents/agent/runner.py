@@ -316,6 +316,7 @@ class AgentRunner:
                             tool_call_id=tool_event.tool_call_id,
                             name=tool_event.name,
                             result=tool_event.result,
+                            structured=tool_event.structured,
                         )
             except ToolProgramError as exc:
                 if title_task is not None and not title_emitted:

@@ -13,7 +13,10 @@ from chat_agents.agent.events import (
     RunCompleted,
     RunEvent,
     RunFailed,
+    ToolFinished,
+    ToolStarted,
     llm_span_id,
+    tool_span_id,
 )
 from chat_agents.conversation.repository import ConversationRepository
 from chat_agents.db.obs import Run, Span
@@ -103,6 +106,179 @@ def test_observe_writes_run_and_span_incrementally_on_completion() -> None:
                 assert span.input_tokens == 3
                 assert span.output_tokens == 4
                 assert span.usage_status == "complete"
+                assert span.ended_at is not None
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.db
+def test_observe_persists_tool_span_parented_to_iteration_span_on_success() -> None:
+    """issue #69：工具跨度挂在当前迭代的模型跨度下，成功即 status=ok。"""
+
+    async def scenario() -> None:
+        async with migrated_engine("chat_agents_observe_tool_ok") as engine:
+            factory = session_factory_for(engine)
+            session_id, trigger_id = await _seed_session_and_trigger(factory)
+            run_id = str(uuid4())
+            message = ModelMessage(role="assistant", content=(TextBlock(text="ok"),))
+
+            source = _events(
+                [
+                    IterationStarted(run_id=run_id, iteration=1),
+                    ToolStarted(
+                        run_id=run_id,
+                        iteration=1,
+                        tool_call_id="call-1",
+                        name="web_search",
+                        arguments={"query": "x"},
+                    ),
+                    ToolFinished(
+                        run_id=run_id,
+                        iteration=1,
+                        tool_call_id="call-1",
+                        name="web_search",
+                        result="找到了",
+                        structured={"result_count": 1},
+                    ),
+                    IterationCompleted(
+                        run_id=run_id,
+                        iteration=1,
+                        message=message,
+                        usage=_USAGE,
+                        stop_reason="stop",
+                    ),
+                    RunCompleted(run_id=run_id, iteration=1, message=message),
+                ]
+            )
+
+            async for _ in observe(
+                source,
+                session_id=session_id,
+                trigger_message_id=trigger_id,
+                effort="medium",
+                model="gpt",
+                session_factory=factory,
+            ):
+                pass
+
+            async with factory() as session:
+                span = (
+                    await session.execute(
+                        select(Span).where(Span.id == tool_span_id(run_id, "call-1"))
+                    )
+                ).scalar_one()
+                assert span.kind == "tool"
+                assert span.status == "ok"
+                assert span.parent_span_id == llm_span_id(run_id, 1)
+                assert span.attributes["result"] == "找到了"
+                assert span.attributes["structured"] == {"result_count": 1}
+                assert span.ended_at is not None
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.db
+def test_observe_marks_tool_span_error_when_structured_is_none() -> None:
+    """耗尽重试的外部失败没有结构化结果——status 由这条事实判定，不是猜测。"""
+
+    async def scenario() -> None:
+        async with migrated_engine("chat_agents_observe_tool_error") as engine:
+            factory = session_factory_for(engine)
+            session_id, trigger_id = await _seed_session_and_trigger(factory)
+            run_id = str(uuid4())
+            message = ModelMessage(role="assistant", content=(TextBlock(text="ok"),))
+
+            source = _events(
+                [
+                    IterationStarted(run_id=run_id, iteration=1),
+                    ToolStarted(
+                        run_id=run_id,
+                        iteration=1,
+                        tool_call_id="call-1",
+                        name="web_search",
+                        arguments={"query": "x"},
+                    ),
+                    ToolFinished(
+                        run_id=run_id,
+                        iteration=1,
+                        tool_call_id="call-1",
+                        name="web_search",
+                        result="目标站拒绝",
+                        structured=None,
+                    ),
+                    IterationCompleted(
+                        run_id=run_id,
+                        iteration=1,
+                        message=message,
+                        usage=_USAGE,
+                        stop_reason="stop",
+                    ),
+                    RunCompleted(run_id=run_id, iteration=1, message=message),
+                ]
+            )
+
+            async for _ in observe(
+                source,
+                session_id=session_id,
+                trigger_message_id=trigger_id,
+                effort="medium",
+                model="gpt",
+                session_factory=factory,
+            ):
+                pass
+
+            async with factory() as session:
+                span = (
+                    await session.execute(
+                        select(Span).where(Span.id == tool_span_id(run_id, "call-1"))
+                    )
+                ).scalar_one()
+                assert span.status == "error"
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.db
+def test_observe_closes_open_tool_span_as_partial_on_client_disconnect() -> None:
+    async def scenario() -> None:
+        async with migrated_engine("chat_agents_observe_tool_disconnect") as engine:
+            factory = session_factory_for(engine)
+            session_id, trigger_id = await _seed_session_and_trigger(factory)
+            run_id = str(uuid4())
+
+            source = _events(
+                [
+                    IterationStarted(run_id=run_id, iteration=1),
+                    ToolStarted(
+                        run_id=run_id,
+                        iteration=1,
+                        tool_call_id="call-1",
+                        name="web_search",
+                        arguments={"query": "x"},
+                    ),
+                ]
+            )
+
+            wrapped = observe(
+                source,
+                session_id=session_id,
+                trigger_message_id=trigger_id,
+                effort="medium",
+                model="gpt",
+                session_factory=factory,
+            )
+            await anext(wrapped)
+            await anext(wrapped)
+            await wrapped.aclose()
+
+            async with factory() as session:
+                span = (
+                    await session.execute(
+                        select(Span).where(Span.id == tool_span_id(run_id, "call-1"))
+                    )
+                ).scalar_one()
+                assert span.status == "error"
+                assert span.usage_status == "partial"
                 assert span.ended_at is not None
 
     asyncio.run(scenario())
