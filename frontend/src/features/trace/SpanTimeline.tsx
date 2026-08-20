@@ -1,16 +1,10 @@
 import { useState } from "react";
 
+import { formatSeconds } from "./format";
 import { ReasoningLine } from "./ReasoningLine";
 import { SpanDetail } from "./SpanDetail";
 import { ToolResultCard } from "./ToolResultCard";
 import type { TraceSpanNode, TraceTree } from "./types";
-
-function formatSeconds(durationMs: number | null): string {
-  if (durationMs === null) {
-    return "…";
-  }
-  return `${(durationMs / 1000).toFixed(1)}s`;
-}
 
 interface SpanChipProps {
   span: TraceSpanNode;

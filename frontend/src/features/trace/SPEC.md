@@ -51,10 +51,10 @@ RUN_FINISHED | RUN_ERROR
    节点（`status: "pending"`），不静默丢弃。
 7. AG-UI envelope 使用 camelCase；自有 payload（`chatagents.*` 的 `value`）
    使用 snake_case——两者不做统一改名，字段名直接照抄各自来源。
-8. 工具跨度的 `status` 由 `structured !== null` 判定：只有真正跑通的工具
-   调用才会产出结构化结果，耗尽重试的外部失败恒为 `null`。这不是猜测，是
-   后端 `ToolFinished.structured` 的结构性事实（见下方「已知缺口」之前的
-   后端改动）。
+8. 工具跨度的 `status` 直接读 `chatagents.tool_result.status`（`ok`/`error`）
+   ——这是显式的可用性状态字段（ADR-0023），不是前端从 `structured` 是否
+   为 `null` 反推出来的；`structured` 恰好也只在 `status === "ok"` 时有值，
+   但两者是各自独立的字段，不能只留一个让读者去猜另一个。
 
 ## 历史视图（`from-run-detail.ts`）
 
@@ -66,6 +66,16 @@ role:"main"` 的顶层跨度各自是一个迭代分组，其下 `kind:"tool"` �
 历史视图**没有独立的思考耗时字段**——持久化只有 `display_summary.text/status`，
 模型跨度的总耗时含生成时间，不是思考耗时，因此历史视图的推理行不显示秒数，
 只显示「▸ 思考」。
+
+## 运行配置区没有直播路径
+
+提示词版本、工具集版本、保留窗口、削减计数四个运行级字段**不在 SSE 线
+上**——`agent/runner.py` 的 `IterationStarted` 只把它们转发进 `observe()`
+落库，`transport/sse.py` 从不把它们编码进任何 AG-UI 帧。直播树因此永远
+拼不出运行配置：`TracePanel` 在运行结束（`!pending`）后按 `RUN_STARTED`
+拿到的 `run_id` 补一次 `GET /api/runs/{run_id}`，只取它的 `runConfig`
+字段，不覆盖已经拼好的直播跨度树（后者字段更全，含工具卡片，没必要用
+持久化视图整体替换）——跟历史消息复用同一个 `useRunDetail` 懒加载 hook。
 
 ## 已知缺口（本票不实现，已开 follow-up issue）
 

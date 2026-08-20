@@ -27,18 +27,27 @@ interface TracePanelProps {
  */
 export function TracePanel({ pending, summary, liveTree, runId }: TracePanelProps) {
   const [expanded, setExpanded] = useState(false);
-  const historical = useRunDetail(liveTree === null ? runId : null);
-  const tree = liveTree ?? historical.tree;
+  // 运行配置区（提示词/工具集版本、保留窗口、削减计数）不在 SSE 线上——
+  // `agent/runner.py` 的 `IterationStarted` 只把这些字段转发进 `observe()`
+  // 落库，从不编码进 AG-UI 帧。直播树因此永远拼不出运行配置，只有运行结束
+  // 后按 `run_id` 补一次 `GET /api/runs/{run_id}` 才拿得到（同一个懒加载
+  // hook，跟历史消息复用）。
+  const resolvedRunId = liveTree?.runId ?? runId;
+  const detail = useRunDetail(resolvedRunId);
+  const tree =
+    liveTree !== null
+      ? { ...liveTree, runConfig: liveTree.runConfig ?? detail.tree?.runConfig ?? null }
+      : detail.tree;
 
   const hasLiveData = liveTree !== null && (liveTree.iterations.length > 0 || liveTree.auxiliary !== null);
-  const canExpand = hasLiveData || runId !== null;
+  const canExpand = hasLiveData || resolvedRunId !== null;
 
   const handleToggle = () => {
     if (!canExpand) {
       return;
     }
-    if (!expanded && liveTree === null) {
-      historical.load();
+    if (!expanded && (liveTree === null || (!pending && liveTree.runConfig === null))) {
+      detail.load();
     }
     setExpanded((prev) => !prev);
   };
@@ -52,7 +61,13 @@ export function TracePanel({ pending, summary, liveTree, runId }: TracePanelProp
     <div className="trace-panel">
       {canExpand ? (
         <button className="run-summary-trigger" type="button" onClick={handleToggle} aria-expanded={expanded}>
-          <SummaryLine pending={pending} summary={summary} />
+          {summary || pending ? (
+            <SummaryLine pending={pending} summary={summary} />
+          ) : (
+            <p className="run-summary">
+              <span className="run-summary-marker">▸</span> 查看运行详情
+            </p>
+          )}
         </button>
       ) : (
         <SummaryLine pending={pending} summary={summary} />
@@ -60,10 +75,10 @@ export function TracePanel({ pending, summary, liveTree, runId }: TracePanelProp
       <ReasoningLine reasoning={lastReasoning} />
       {expanded && (
         <div className="trace-detail">
-          {historical.status === "loading" && <p className="trace-loading">加载运行详情…</p>}
-          {historical.status === "error" && (
+          {detail.status === "loading" && <p className="trace-loading">加载运行详情…</p>}
+          {detail.status === "error" && (
             <p className="trace-error" role="alert">
-              {historical.error}
+              {detail.error}
             </p>
           )}
           {tree !== null && <SpanTimeline tree={tree} />}

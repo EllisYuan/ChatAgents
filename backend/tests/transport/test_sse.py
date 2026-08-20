@@ -171,9 +171,42 @@ def test_tool_round_trip_emits_both_result_outlets() -> None:
     assert isinstance(tool_result_value["duration_ms"], int)
     assert tool_result_value["duration_ms"] >= 0
     assert tool_result_value["structured"] == {"result_count": 1}
+    assert tool_result_value["status"] == "ok"
     result_event = next(f for f in frames if f["type"] == "TOOL_CALL_RESULT")
     assert result_event["content"] == "found it"
     assert result_event["role"] == "tool"
+
+
+def test_tool_result_status_is_error_when_structured_is_none() -> None:
+    """耗尽重试的外部失败没有结构化结果——`status` 是显式字段，不靠前端反推（ADR-0023）。"""
+    frames = _frames(
+        _events(
+            [
+                IterationStarted(run_id=RUN_ID, iteration=1),
+                ToolStarted(
+                    run_id=RUN_ID,
+                    iteration=1,
+                    tool_call_id="call-1",
+                    name="web_search",
+                    arguments={"query": "q"},
+                ),
+                ToolFinished(
+                    run_id=RUN_ID,
+                    iteration=1,
+                    tool_call_id="call-1",
+                    name="web_search",
+                    result="目标站拒绝",
+                    structured=None,
+                ),
+                RunFailed(run_id=RUN_ID, iteration=1, reason="stopped"),
+            ]
+        )
+    )
+    tool_result_value = next(f for f in frames if f.get("name") == "chatagents.tool_result")[
+        "value"
+    ]
+    assert tool_result_value["structured"] is None
+    assert tool_result_value["status"] == "error"
 
 
 def test_run_failed_maps_to_run_error_with_dedicated_code() -> None:

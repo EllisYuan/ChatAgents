@@ -1,12 +1,6 @@
 import { DomainBadge, domainOf } from "./DomainBadge";
+import { formatSeconds } from "./format";
 import type { TraceSpanNode } from "./types";
-
-function formatSeconds(durationMs: number | null): string {
-  if (durationMs === null) {
-    return "—";
-  }
-  return `${(durationMs / 1000).toFixed(1)}s`;
-}
 
 interface SearchHit {
   title?: unknown;

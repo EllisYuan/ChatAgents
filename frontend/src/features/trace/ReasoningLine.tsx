@@ -1,10 +1,7 @@
 import { useState } from "react";
 
+import { formatSeconds } from "./format";
 import type { ReasoningState } from "./types";
-
-function formatSeconds(durationMs: number): string {
-  return `${(durationMs / 1000).toFixed(1)}s`;
-}
 
 interface ReasoningLineProps {
   reasoning: ReasoningState | null;

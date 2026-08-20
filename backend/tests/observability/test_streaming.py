@@ -125,6 +125,16 @@ def test_observe_persists_tool_span_parented_to_iteration_span_on_success() -> N
             source = _events(
                 [
                     IterationStarted(run_id=run_id, iteration=1),
+                    # 真实顺序（见 agent/runner.py）：模型跨度先随 IterationCompleted
+                    # 关闭，工具调用才开始——工具跨度的父跨度不能靠一个「模型跨度
+                    # 还开着」的假设去接，必须在关闭之后仍记得它的 id。
+                    IterationCompleted(
+                        run_id=run_id,
+                        iteration=1,
+                        message=message,
+                        usage=_USAGE,
+                        stop_reason="tool_use",
+                    ),
                     ToolStarted(
                         run_id=run_id,
                         iteration=1,
@@ -139,13 +149,6 @@ def test_observe_persists_tool_span_parented_to_iteration_span_on_success() -> N
                         name="web_search",
                         result="找到了",
                         structured={"result_count": 1},
-                    ),
-                    IterationCompleted(
-                        run_id=run_id,
-                        iteration=1,
-                        message=message,
-                        usage=_USAGE,
-                        stop_reason="stop",
                     ),
                     RunCompleted(run_id=run_id, iteration=1, message=message),
                 ]
@@ -191,6 +194,13 @@ def test_observe_marks_tool_span_error_when_structured_is_none() -> None:
             source = _events(
                 [
                     IterationStarted(run_id=run_id, iteration=1),
+                    IterationCompleted(
+                        run_id=run_id,
+                        iteration=1,
+                        message=message,
+                        usage=_USAGE,
+                        stop_reason="tool_use",
+                    ),
                     ToolStarted(
                         run_id=run_id,
                         iteration=1,
@@ -205,13 +215,6 @@ def test_observe_marks_tool_span_error_when_structured_is_none() -> None:
                         name="web_search",
                         result="目标站拒绝",
                         structured=None,
-                    ),
-                    IterationCompleted(
-                        run_id=run_id,
-                        iteration=1,
-                        message=message,
-                        usage=_USAGE,
-                        stop_reason="stop",
                     ),
                     RunCompleted(run_id=run_id, iteration=1, message=message),
                 ]
@@ -245,10 +248,18 @@ def test_observe_closes_open_tool_span_as_partial_on_client_disconnect() -> None
             factory = session_factory_for(engine)
             session_id, trigger_id = await _seed_session_and_trigger(factory)
             run_id = str(uuid4())
+            message = ModelMessage(role="assistant", content=(TextBlock(text="ok"),))
 
             source = _events(
                 [
                     IterationStarted(run_id=run_id, iteration=1),
+                    IterationCompleted(
+                        run_id=run_id,
+                        iteration=1,
+                        message=message,
+                        usage=_USAGE,
+                        stop_reason="tool_use",
+                    ),
                     ToolStarted(
                         run_id=run_id,
                         iteration=1,
@@ -269,6 +280,7 @@ def test_observe_closes_open_tool_span_as_partial_on_client_disconnect() -> None
             )
             await anext(wrapped)
             await anext(wrapped)
+            await anext(wrapped)
             await wrapped.aclose()
 
             async with factory() as session:
@@ -280,6 +292,7 @@ def test_observe_closes_open_tool_span_as_partial_on_client_disconnect() -> None
                 assert span.status == "error"
                 assert span.usage_status == "partial"
                 assert span.ended_at is not None
+                assert span.parent_span_id == llm_span_id(run_id, 1)
 
     asyncio.run(scenario())
 

@@ -278,10 +278,9 @@ function usageStatusOf(usage: UsagePayload | null): UsageStatus | null {
 }
 
 function toolStatusOf(tool: PendingToolSpan): SpanStatus {
-  if (tool.result === null) {
-    return "pending";
-  }
-  return tool.result.structured !== null ? "ok" : "error";
+  // `status` 是显式的可用性状态字段（ADR-0023）——不从 `structured` 是否为
+  // `null` 反推，那样等于把后端已经判定过的事实在前端猜一遍。
+  return tool.result?.status ?? "pending";
 }
 
 function toolCardOf(tool: PendingToolSpan): ToolCardData {

@@ -323,6 +323,7 @@ async def encode_sse(
                                 result=result,
                                 duration_ms=tool_duration_ms,
                                 structured=structured,
+                                status="ok" if structured is not None else "error",
                             ).model_dump(),
                         )
                     )

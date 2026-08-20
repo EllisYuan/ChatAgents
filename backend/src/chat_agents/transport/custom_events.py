@@ -45,15 +45,18 @@ class ToolResultPayload(BaseModel):
     外部失败已由 `ToolExecutor` 编码进这段文本本身。
 
     `structured` 与 `ToolFinished.structured` 同源，只在真正跑通时有值
-    （issue #69）：耗尽重试的外部失败恒为 `None`——这不是猜出来的错误标记，
-    是「有没有产出结构化结果」这件事本身的如实反映。工具结果卡片（标题/
-    供应商域名/相关性分等）就靠这个字段渲染。
+    （issue #69）：耗尽重试的外部失败恒为 `None`。`status` 是这件事的显式
+    可用性状态字段（ADR-0023：可能没有值的字段要配一个说明为什么没有的
+    状态，不能让读者从别的字段的空值去猜）——`structured` 是否为 `None`
+    不该由前端反推，这里把判定结果如实带上。工具结果卡片（标题/供应商
+    域名/相关性分等）靠 `structured` 渲染，失败态靠 `status` 判定。
     """
 
     tool_call_id: str
     result: str
     duration_ms: int
     structured: dict[str, Any] | None
+    status: Literal["ok", "error"]
 
 
 class TitlePayload(BaseModel):

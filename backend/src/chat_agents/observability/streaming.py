@@ -76,6 +76,11 @@ async def observe(
     writer = RunWriter(session_factory=session_factory)
     run_id: str | None = None
     main_span_open: UUID | None = None
+    # `IterationCompleted` 到工具调用之间 `runner.py` 已经先关闭模型跨度
+    # （见 events.py 里两者的相对顺序）——工具跨度的父跨度因此不能在
+    # `IterationCompleted` 里跟着清空，得单独记一份「当前迭代模型跨度 id」，
+    # 只在下一次 `IterationStarted` 到来时才换成新值（issue #69）。
+    current_iteration_span_id: UUID | None = None
     title_span_open: UUID | None = None
     tool_spans_open: dict[str, UUID] = {}
     main_terminal = False
@@ -132,6 +137,7 @@ async def observe(
             elif isinstance(event, IterationStarted):
                 main_reasoning.clear()
                 main_span_open = llm_span_id(run_id, event.iteration)
+                current_iteration_span_id = main_span_open
                 await writer.open_span(
                     span_id=main_span_open,
                     run_id=run_id,
@@ -169,7 +175,7 @@ async def observe(
                 await writer.open_span(
                     span_id=span_id,
                     run_id=run_id,
-                    parent_span_id=main_span_open,
+                    parent_span_id=current_iteration_span_id,
                     name=event.name,
                     kind="tool",
                     role=None,
@@ -181,13 +187,13 @@ async def observe(
                 )
 
             elif isinstance(event, ToolFinished):
-                span_id = tool_spans_open.get(event.tool_call_id)
-                if span_id is not None:
+                closing_span_id = tool_spans_open.get(event.tool_call_id)
+                if closing_span_id is not None:
                     del tool_spans_open[event.tool_call_id]
                     # 只有真正跑通的工具调用才会产出 structured；耗尽重试的外部
                     # 失败恒为 None——status 由这条结构性事实判定，不是猜测。
                     await writer.close_span(
-                        span_id=span_id,
+                        span_id=closing_span_id,
                         run_id=run_id,
                         status="ok" if event.structured is not None else "error",
                         usage_status=None,
