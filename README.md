@@ -124,61 +124,57 @@ docker-compose up -d --build
 - **后端 API**: http://localhost:8080
 - **API 文档**: http://localhost:8080/docs
 
-### 🚢 生产环境部署（Docker + Nginx）
+### 🚢 生产环境部署（宿主 nginx + Docker 后端）
 
-**适用场景**：通过域名访问，支持 HTTPS
+**链路**：`浏览器 → 宿主 nginx（宝塔，TLS）┬ / → 直接读磁盘（前端静态产物）`
+`                                       └ /api/ → 127.0.0.1:19180 → backend 容器`
 
-1. **启动 Docker 容器**
+前端不进容器：静态产物由宿主 nginx 直接读磁盘伺服，`/api/` 只穿这一层 nginx 直连后端。原因见下方「SSE 只能穿一层 nginx」。
 
-```bash
-# 克隆代码到服务器
-git clone <your-repo-url> /path/to/chatbot
-cd /path/to/chatbot
+#### 一次性服务器准备（人做，CD 做不了）
 
-# 配置环境变量
-cp .env.sample .env
-vim .env  # 填入 API 密钥
+1. 建站 `agent.ellisyuan.com` + 申请证书（宝塔面板操作）
+2. `git clone` 仓库到 `/www/chatagents/repo`
+3. 在 clone 目录**之外**写 `/www/chatagents/.env`（含 `POSTGRES_*`、`ANTHROPIC_API_KEY` 等），`chmod 600`——CD 只读它，绝不写它
+4. 宝塔站点配置里加一行：
+   ```nginx
+   include /www/chatagents/repo/deploy/nginx/site.conf;
+   ```
+5. 配置 GitHub Actions 的 SSH 部署密钥与服务器 IP 白名单
 
-# 可选：修改端口（默认 8080/8501）
-# 在 .env 中添加：
-# BACKEND_PORT=9080
-# FRONTEND_PORT=9501
+> **⚠️ 在宝塔面板里直接改 Nginx 配置会被下一次部署覆盖。** `deploy/nginx/site.conf` 随 `git checkout <tag>` 换版，面板里的手改内容不会被保留。要改路由、超时、`try_files` 这类应用属性的配置，改仓库里的 `deploy/nginx/site.conf` 再发布；只有 TLS、证书路径、监听端口这类机器属性才在面板里改。详见 [ADR-0032](./docs/adr/0032-app-config-lives-in-the-repo-machine-config-does-not.md)。
 
-# 启动容器
-docker-compose up -d --build
-
-# 检查状态
-docker ps | grep chatbot
-docker logs chatbot-backend --tail 50
-```
-
-2. **配置 Nginx 反向代理**
+#### 发布 / 回滚
 
 ```bash
-# 复制 Nginx 配置模板
-sudo cp docs/nginx.conf.example /etc/nginx/sites-available/chatbot.conf
-
-# 或宝塔面板用户
-sudo cp docs/nginx.conf.example /www/server/panel/vhost/nginx/your-domain.conf
-
-# 编辑配置：修改域名、SSL 证书路径、端口号
-sudo vim /etc/nginx/sites-available/chatbot.conf
-
-# 启用配置（非宝塔用户）
-sudo ln -s /etc/nginx/sites-available/chatbot.conf /etc/nginx/sites-enabled/
-
-# 测试并重载
-sudo nginx -t && sudo systemctl reload nginx
+./scripts/deploy.sh v1.4.2
 ```
 
-3. **验证部署**
+换一个 tag 重跑就是回滚，不依赖 CI 是否可用。脚本会拉取 `ghcr.io` 镜像、跑 `compose.yaml` + `compose.prod.yaml`、从 GitHub Release 下载前端产物解到 `/www/chatagents/frontend/<tag>` 并把 `current` 软链接指过去。前置条件见脚本头部注释。
+
+#### SSE 只能穿一层 nginx（结构性要求）
+
+`X-Accel-Buffering` 属于 `X-Accel-*` 一族，只在离用户最近的那一层生效——被第一层吃掉就不会向下传。如果 `/api/` 串两层 nginx（例如又经过容器内一层），就会有一层照常缓冲，**且失效是静默的**：流式响应不报错，只是攒一坨再吐，本地单层环境永远复现不出来。解法不是两层都配 `proxy_buffering off`，而是让 `/api/` 只穿一层——这也是前端不进容器的原因之一。
+
+#### 部署后必做：curl -N 实测
+
+这是「SSE 被静默攒批」唯一的检出手段，且不归 CI（CI 环境没有真实 nginx）：
 
 ```bash
-curl https://your-domain.com/health
-# 应返回：{"status":"healthy"}
+curl -N https://agent.ellisyuan.com/api/runs -X POST \
+  -H "Content-Type: application/json" -d '{"session_id":"...", "message":"你好"}'
+# 应逐条打印事件，而不是卡住不动然后一次性吐出一大坨
 ```
 
-**端口配置**：通过 `.env` 文件设置 `BACKEND_PORT` 和 `FRONTEND_PORT`，默认 8080/8501
+同时验证：
+
+```bash
+curl https://agent.ellisyuan.com/health
+# 应返回 {"status":"ok","version":"v1.4.2"}（版本号来自当次部署的 git tag）
+
+curl -I https://agent.ellisyuan.com/s/00000000-0000-0000-0000-000000000000
+# 刷新前端路由不应 404——依赖 deploy/nginx/site.conf 里的 try_files
+```
 
 ## 📖 使用指南
 
@@ -327,102 +323,50 @@ intelligent-chatbot/
 
 ## 🐛 常见问题与故障排查
 
-### Docker 部署问题
+### 部署问题
 
-#### 1. 前端显示"❌ 后端服务未运行"
+#### 1. 刷新 `/s/<uuid>` 返回 404
 
-**现象**：页面显示后端未连接，无法使用聊天功能
+**原因**：`deploy/nginx/site.conf` 里的 `try_files` 没生效——要么宝塔站点配置漏了 `include` 那一行，要么 `root` 指向的目录不是当前发布版本。
 
-**原因分析**：
-1. `BACKEND_URL` 环境变量配置错误
-2. 前端容器无法访问后端容器
-3. 健康检查端点路径错误
-
-**解决方案**：
-
+**排查**：
 ```bash
-# 1. 检查容器状态
-docker ps | grep chatbot
-# 确认两个容器都在运行且 backend 状态为 healthy
+# 确认 include 生效
+nginx -T | grep -A3 "location /"
 
-# 2. 检查环境变量
-docker exec chatbot-frontend env | grep BACKEND_URL
-# 应该输出：BACKEND_URL=http://backend:8080
-
-# 3. 测试容器间通信
-docker exec chatbot-frontend curl -s http://backend:8080/health
-# 应返回：{"message":"后端 API 正在运行","status":"healthy"}
-
-# 4. 如果失败，检查 docker-compose.yml
-# 确保：
-#   - BACKEND_URL=http://backend:8080（使用服务名，不是 localhost）
-#   - 两个服务在同一 network
-#   - backend 服务有 healthcheck 配置
-
-# 5. 重新部署
-docker-compose down
-docker-compose up -d --build
+# 确认软链接指向本次发布的 tag
+readlink -f /www/chatagents/frontend/current
 ```
 
-#### 2. Nginx 配置后出现 404 Not Found
+#### 2. `/api/` 返回 404 或路径被截断
 
-**现象**：访问 `https://your-domain.com/api/sessions` 返回 404
-
-**原因**：Nginx `proxy_pass` 配置错误，路径被截断
+**原因**：`proxy_pass` 末尾多了一条斜杠，把 `/api/` 前缀截断了。
 
 **错误配置**：
 ```nginx
 location /api/ {
-    proxy_pass http://127.0.0.1:9080/;  # ❌ 末尾的斜杠导致路径被截断
+    proxy_pass http://127.0.0.1:19180/;  # ❌ 末尾的斜杠导致路径被截断
 }
 ```
 
-**正确配置**：
+**正确配置**（`deploy/nginx/site.conf` 里已是这样）：
 ```nginx
 location /api/ {
-    proxy_pass http://127.0.0.1:9080;  # ✓ 末尾无斜杠，保留完整路径
+    proxy_pass http://127.0.0.1:19180;  # ✓ 末尾无斜杠，保留完整路径
 }
 ```
 
 **验证**：
 ```bash
-# 测试后端直连
-curl http://localhost:9080/api/sessions
-# 应返回会话列表 JSON
-
-# 测试 Nginx 代理
-curl https://your-domain.com/api/sessions
-# 应返回相同结果
+curl http://127.0.0.1:19180/api/sessions   # 后端直连
+curl https://agent.ellisyuan.com/api/sessions  # 经 nginx 代理，应返回相同结果
 ```
 
-#### 3. WebSocket 连接失败（Streamlit 无法加载）
+#### 3. 流式回复攒一坨才吐出来（SSE 被静默缓冲）
 
-**现象**：前端页面一直加载，或显示连接错误
+**原因**：`/api/` 串了不止一层 nginx，或某一层缺了 `proxy_buffering off`。`X-Accel-Buffering` 只在离用户最近的那一层生效，失效不报错——见上文「SSE 只能穿一层 nginx」。
 
-**原因**：Nginx 缺少 WebSocket 升级配置
-
-**解决方案**：
-
-确保 Nginx 配置包含以下 location：
-
-```nginx
-location /_stcore/stream {
-    proxy_pass http://127.0.0.1:9501/_stcore/stream;
-    proxy_http_version 1.1;
-
-    # 必需：WebSocket 升级头
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
-
-    proxy_set_header Host $host;
-    proxy_read_timeout 86400;  # WebSocket 长连接
-}
-```
-
-重载 Nginx：
-```bash
-sudo nginx -t && sudo systemctl reload nginx
-```
+**解决方案**：确认 `/api/` 只经过宿主这一层 nginx（不要再套一层容器内 nginx），且 `deploy/nginx/site.conf` 里的 `proxy_buffering off` 没被面板手改覆盖掉。用 `curl -N` 实测确认逐条到达。
 
 ### 本地开发问题
 
