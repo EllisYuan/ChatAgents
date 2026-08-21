@@ -89,7 +89,19 @@ uv sync --project backend
 Before running tests for the first time, start the local PostgreSQL service:
 
 ```bash
-docker compose up -d postgres
+docker compose up -d postgresql
+```
+
+Local defaults are: service `postgresql`, container `chatagent-postgresql`, database `chat_agents`, user `root`, password `Agent@Dev_1`, address `127.0.0.1:5432`, and volume `chatagent_postgres-data`. Environment variables may override these values. Encode the password as `Agent%40Dev_1` inside a database URL:
+
+```text
+postgresql+psycopg://root:Agent%40Dev_1@127.0.0.1:5432/chat_agents
+```
+
+The backend waits for the `migrate` service automatically. To initialize the schema separately, run:
+
+```bash
+docker compose run --rm migrate
 ```
 
 #### 3. Configure Environment Variables

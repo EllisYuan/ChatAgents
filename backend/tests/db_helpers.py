@@ -26,7 +26,7 @@ if sys.platform == "win32":
     # 无关）；测试专用，只在这个进程里切换事件循环策略。
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-_DATABASE_URL = "postgresql+psycopg://postgres:postgres@localhost:5432/chat_agents"
+_DATABASE_URL = "postgresql+psycopg://root:Agent%40Dev_1@127.0.0.1:5432/chat_agents"
 _BACKEND_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -51,7 +51,7 @@ def _temp_database(prefix: str) -> Iterator[URL]:
         except Exception as exc:  # pragma: no cover - depends on local service
             raise AssertionError(
                 "PostgreSQL is required for integration tests. "
-                "Start it with `docker compose up -d postgres`."
+                "Start it with `docker compose up -d postgresql`."
             ) from exc
         with admin_engine.connect() as connection:
             connection.execute(text(f'CREATE DATABASE "{database_name}"'))

@@ -10,7 +10,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.exc import OperationalError
 
-_DATABASE_URL = "postgresql+psycopg://postgres:postgres@localhost:5432/chat_agents"
+_DATABASE_URL = "postgresql+psycopg://root:Agent%40Dev_1@127.0.0.1:5432/chat_agents"
 _BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -48,7 +48,7 @@ def test_upgrade_head_creates_application_and_observability_schemas() -> None:
         except OperationalError:
             pytest.fail(
                 "PostgreSQL is required for integration tests. "
-                "Start it with `docker compose up -d postgres`."
+                "Start it with `docker compose up -d postgresql`."
             )
 
         with admin_engine.connect() as connection:

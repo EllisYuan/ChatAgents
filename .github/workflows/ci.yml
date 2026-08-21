@@ -21,18 +21,18 @@ jobs:
     name: Ruff, mypy, and database integration
     runs-on: ubuntu-latest
     env:
-      DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/chat_agents
+      DATABASE_URL: postgresql+psycopg://root:Agent%40Dev_1@localhost:5432/chat_agents
     services:
-      postgres:
+      postgresql:
         image: postgres:18.4
         env:
           POSTGRES_DB: chat_agents
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: root
+          POSTGRES_PASSWORD: Agent@Dev_1
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U postgres -d chat_agents"
+          --health-cmd "pg_isready -U root -d chat_agents"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 5
@@ -65,18 +65,18 @@ jobs:
       eval_changed_inputs: ${{ steps.compare.outputs.eval_changed_inputs }}
       eval_baseline_missing: ${{ steps.compare.outputs.eval_baseline_missing }}
     env:
-      DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/chat_agents
+      DATABASE_URL: postgresql+psycopg://root:Agent%40Dev_1@localhost:5432/chat_agents
     services:
-      postgres:
+      postgresql:
         image: postgres:18.4
         env:
           POSTGRES_DB: chat_agents
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: root
+          POSTGRES_PASSWORD: Agent@Dev_1
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U postgres -d chat_agents"
+          --health-cmd "pg_isready -U root -d chat_agents"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 5
@@ -123,22 +123,22 @@ jobs:
     continue-on-error: true
     runs-on: ubuntu-latest
     env:
-      DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/chat_agents
+      DATABASE_URL: postgresql+psycopg://root:Agent%40Dev_1@localhost:5432/chat_agents
       EVAL_CASES_PER_EFFORT: "8"
       EVAL_TOTAL_CASES: "32"
       EVAL_JUDGE_MODEL: ${{ secrets.EVAL_JUDGE_MODEL }}
       EVAL_ENDPOINT_PROFILE: ${{ secrets.EVAL_ENDPOINT_PROFILE }}
     services:
-      postgres:
+      postgresql:
         image: postgres:18.4
         env:
           POSTGRES_DB: chat_agents
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: root
+          POSTGRES_PASSWORD: Agent@Dev_1
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U postgres -d chat_agents"
+          --health-cmd "pg_isready -U root -d chat_agents"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 5
@@ -175,7 +175,7 @@ jobs:
       matrix:
         retention_window: [1, 2, 3, 5, 8]
     env:
-      DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/chat_agents
+      DATABASE_URL: postgresql+psycopg://root:Agent%40Dev_1@localhost:5432/chat_agents
       EVAL_CASES_PER_EFFORT: "8"
       EVAL_TOTAL_CASES: "32"
       EVAL_RETENTION_WINDOW: ${{ matrix.retention_window }}

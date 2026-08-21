@@ -1,4 +1,4 @@
-name: chatagents
+name: chatagent
 
 x-default-logging: &default-logging
   driver: json-file
@@ -7,14 +7,17 @@ x-default-logging: &default-logging
     max-file: "3"
 
 services:
-  postgres:
+  postgresql:
+    container_name: chatagent-postgresql
     image: postgres:18.4
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-chat_agents}
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_USER: ${POSTGRES_USER:-root}
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-Agent@Dev_1}"
     volumes:
       - postgres-data:/var/lib/postgresql
+    ports:
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
@@ -32,9 +35,9 @@ services:
       args:
         APP_VERSION: ${APP_VERSION:-dev}
     environment:
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-chat_agents}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-root}:${POSTGRES_PASSWORD_URLENCODED:-Agent%40Dev_1}@postgresql:5432/${POSTGRES_DB:-chat_agents}
     depends_on:
-      postgres:
+      postgresql:
         condition: service_healthy
     command: ["python", "-m", "alembic", "upgrade", "head"]
     logging: *default-logging
@@ -55,7 +58,7 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       TAVILY_API_KEY: ${TAVILY_API_KEY:-}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-chat_agents}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-root}:${POSTGRES_PASSWORD_URLENCODED:-Agent%40Dev_1}@postgresql:5432/${POSTGRES_DB:-chat_agents}
       CHATAGENTS_ENDPOINTS_CONFIG_PATH: ${CHATAGENTS_ENDPOINTS_CONFIG_PATH:-/app/config/endpoints.yaml}
     depends_on:
       migrate:

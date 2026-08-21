@@ -44,7 +44,7 @@ COMPOSE=(docker compose -f compose.yaml -f compose.prod.yaml --env-file "$ENV_FI
 echo "==> [2/5] 拉取 ghcr.io 镜像 $APP_VERSION"
 "${COMPOSE[@]}" pull migrate backend
 
-echo "==> [3/5] 起 postgres / 跑迁移 / 换后端（迁移失败会让 backend 起不来，失败可辨识）"
+echo "==> [3/5] 起 postgresql / 跑迁移 / 换后端（迁移失败会让 backend 起不来，失败可辨识）"
 "${COMPOSE[@]}" up -d
 
 echo "==> [4/5] 下发前端产物到宿主机磁盘"

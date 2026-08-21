@@ -1,6 +1,7 @@
 """Issue #63 的容器与 Compose 静态契约。"""
 
 from pathlib import Path
+from typing import Any, cast
 
 import yaml
 
@@ -14,31 +15,47 @@ class _ComposeLoader(yaml.SafeLoader):
 _ComposeLoader.add_constructor("!reset", lambda _loader, _node: None)
 
 
-def _compose(path: str) -> dict:
-    return yaml.load((REPO_ROOT / path).read_text(encoding="utf-8"), Loader=_ComposeLoader)
+def _compose(path: str) -> dict[str, Any]:
+    return cast(
+        dict[str, Any],
+        yaml.load((REPO_ROOT / path).read_text(encoding="utf-8"), Loader=_ComposeLoader),
+    )
 
 
-def test_base_compose_has_only_backend_postgres_and_migrate() -> None:
+def test_base_compose_has_only_backend_postgresql_and_migrate() -> None:
     compose = _compose("compose.yaml")
 
-    assert set(compose["services"]) == {"backend", "postgres", "migrate"}
+    assert set(compose["services"]) == {"backend", "postgresql", "migrate"}
 
 
-def test_postgres_is_private_pinned_and_persisted() -> None:
-    postgres = _compose("compose.yaml")["services"]["postgres"]
+def test_postgresql_is_loopback_pinned_and_persisted() -> None:
+    postgresql = _compose("compose.yaml")["services"]["postgresql"]
 
-    assert postgres["image"] == "postgres:18.4"
-    assert "ports" not in postgres
-    assert "/var/lib/postgresql" in postgres["volumes"][0]
+    assert postgresql["container_name"] == "chatagent-postgresql"
+    assert postgresql["image"] == "postgres:18.4"
+    assert postgresql["ports"] == ["127.0.0.1:5432:5432"]
+    assert postgresql["volumes"] == ["postgres-data:/var/lib/postgresql"]
+    assert postgresql["environment"] == {
+        "POSTGRES_DB": "${POSTGRES_DB:-chat_agents}",
+        "POSTGRES_USER": "${POSTGRES_USER:-root}",
+        "POSTGRES_PASSWORD": "${POSTGRES_PASSWORD:-Agent@Dev_1}",
+    }
 
 
 def test_backend_waits_for_migration_and_binds_loopback_only() -> None:
     backend = _compose("compose.yaml")["services"]["backend"]
     migrate = _compose("compose.yaml")["services"]["migrate"]
+    expected_database_url = (
+        "postgresql+psycopg://${POSTGRES_USER:-root}:"
+        "${POSTGRES_PASSWORD_URLENCODED:-Agent%40Dev_1}"
+        "@postgresql:5432/${POSTGRES_DB:-chat_agents}"
+    )
 
     assert backend["ports"] == ["127.0.0.1:19180:8080"]
     assert backend["depends_on"] == {"migrate": {"condition": "service_completed_successfully"}}
-    assert migrate["depends_on"] == {"postgres": {"condition": "service_healthy"}}
+    assert backend["environment"]["DATABASE_URL"] == expected_database_url
+    assert migrate["depends_on"] == {"postgresql": {"condition": "service_healthy"}}
+    assert migrate["environment"]["DATABASE_URL"] == expected_database_url
     assert migrate["command"] == ["python", "-m", "alembic", "upgrade", "head"]
 
 

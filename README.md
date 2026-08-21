@@ -86,7 +86,31 @@ uv sync --project backend
 首次运行测试前，启动本地 PostgreSQL：
 
 ```bash
-docker compose up -d postgres
+docker compose up -d postgresql
+```
+
+本地数据库默认配置如下，均可通过同名环境变量覆盖：
+
+| 项目 | 默认值 |
+|---|---|
+| Compose service | `postgresql` |
+| Container | `chatagent-postgresql` |
+| Database | `chat_agents` |
+| User | `root` |
+| Password | `Agent@Dev_1` |
+| Host | `127.0.0.1:5432` |
+| Volume | `chatagent_postgres-data` |
+
+密码写入连接 URL 时，`@` 必须编码为 `%40`：
+
+```text
+postgresql+psycopg://root:Agent%40Dev_1@127.0.0.1:5432/chat_agents
+```
+
+Compose 启动 backend 时会先运行 `migrate` service；单独初始化数据库可执行：
+
+```bash
+docker compose run --rm migrate
 ```
 
 #### 3. 配置环境变量
@@ -330,6 +354,8 @@ curl http://127.0.0.1:19180/api/sessions   # 后端直连
 curl https://agent.ellisyuan.com/api/sessions  # 经 nginx 代理，应返回相同结果
 ```
 
+会话列表使用 `(before_updated_at, before_id)` 复合游标：第一页省略两项；后续页必须同时传入两项。query 参数没有 JSON `null` 表达，客户端应省略空值，不能发送 `before_id=null` 或 `before_updated_at=null`。
+
 #### 3. 流式回复攒一坨才吐出来（SSE 被静默缓冲）
 
 **原因**：`/api/` 串了不止一层 nginx，或某一层缺了 `proxy_buffering off`。`X-Accel-Buffering` 只在离用户最近的那一层生效，失效不报错——见上文「SSE 只能穿一层 nginx」。
@@ -415,10 +441,26 @@ docker compose up -d --build
 备份数据库：
 
 ```bash
-docker compose exec postgres pg_dump -U postgres -d chat_agents > chat_agents.sql
+docker compose exec postgresql pg_dump -U root -d chat_agents > chat_agents.sql
 ```
 
 恢复数据库前先确认服务已停止，再按 PostgreSQL 工具的恢复流程导入 `chat_agents.sql`。
+
+仅在确认可以删除全部本地数据时，才重建数据库 volume：
+
+```bash
+docker compose down --volumes --remove-orphans
+docker compose up -d postgresql
+docker compose run --rm migrate
+```
+
+`docker compose down --volumes` 会永久删除 `chatagent_postgres-data` 中的会话与观测数据。全新 volume 会按照 `POSTGRES_USER=root` 初始化，`root` 自动具备 migration 和集成测试所需的 `SUPERUSER`、`CREATEDB` 权限。
+
+验证 migration revision：
+
+```bash
+docker compose exec postgresql psql -U root -d chat_agents -c "SELECT version_num FROM public.alembic_version;"
+```
 
 ### 性能问题
 
@@ -436,7 +478,7 @@ docker compose exec postgres pg_dump -U postgres -d chat_agents > chat_agents.sq
 ```bash
 # Docker 日志
 docker compose logs backend --tail 100 -f
-docker compose logs postgres --tail 100 -f
+docker compose logs postgresql --tail 100 -f
 
 # Nginx 日志
 sudo tail -f /var/log/nginx/chatbot.access.log
