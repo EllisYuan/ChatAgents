@@ -41,9 +41,6 @@ env/
 .env
 .env.local
 
-# Streamlit
-.streamlit/secrets.toml
-
 # 日志
 *.log
 

@@ -42,7 +42,7 @@
 
 ### 1.2 置信度评估
 * **综合置信度**：**95% (High)**
-* **依据**：查阅了 2026 年 OpenTelemetry GenAI 语义规范、Langfuse v3 (MIT 核心)、Arize Phoenix REST API & Cost Engine 源码及 Docker 部署模型，并结合了项目已有的 `app.py`、`backend/agent.py` 及 FastAPI/React 架构。
+* **依据**：查阅了 2026 年 OpenTelemetry GenAI 语义规范、Langfuse v3 (MIT 核心)、Arize Phoenix REST API & Cost Engine 源码及 Docker 部署模型，并结合了项目已有的 `backend/src/chat_agents/main.py`、`backend/src/chat_agents/agent` 及 FastAPI/React 架构。
 
 ---
 

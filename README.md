@@ -4,7 +4,7 @@
 **一个集成了 Web 搜索、内容提取和深度思考能力的智能体助手**
 
 ![Python](https://img.shields.io/badge/Python-3.11--3.12-blue.svg)
-![Streamlit](https://img.shields.io/badge/Streamlit-1.32+-red.svg)
+![React](https://img.shields.io/badge/React-19+-61DAFB.svg)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.109+-green.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
 
@@ -18,21 +18,21 @@
 
 这是一个能够联网搜索的智能聊天机器人：
 
-1. **简单聊天机器人**（基于 Streamlit + LLM）
-2. **Tavily Web 智能体**（基于 LangGraph + Tavily）
+1. **智能聊天机器人**（基于 React + LLM）
+2. **Tavily Web 智能体**（基于 AgentRunner + Tavily）
 
-通过混合架构 Streamlit + LangGraph + Tavily，为LLM提供了强大的 Web 搜索、内容提取和深度思考的能力。
+通过 React + FastAPI + AgentRunner + Tavily 架构，为 LLM 提供强大的 Web 搜索、内容提取和深度思考能力。
 
 ## ✨ 功能特性
 
 ### 🎯 核心功能
-- **💬 交互式聊天界面**：基于Streamlit，构建简洁快捷的UI
+- **💬 交互式聊天界面**：基于 React，支持会话、流式回复和模型选择
 - **🔍 实时 Web 搜索**：通过 Tavily 联网搜索最新信息
 - **🕷️ 网站深度爬取**：深度爬取网站嵌套链接
 - **📄 网页内容提取**：提取网页关键内容, 节省Token消耗
 - **🧠 深度思考模式**：支持复杂查询的深度推理
 - **⚡ 快速响应模式**：适合简单问题的快速回答
-- **💭 对话记忆**：基于 LangGraph 的对话历史管理
+- **💭 对话记忆**：基于 FastAPI 与 PostgreSQL 的会话历史管理
 
 ### 🛠️ 高级特性
 - **🔑 灵活的 API 密钥管理**：支持 Claude、Tavily 等多个 API
@@ -50,9 +50,9 @@
 
 | 层级 | 技术 | 说明 |
 |------|------|------|
-| **前端** | Streamlit | 简洁的 Python Web 框架 |
+| **前端** | React + Vite | 现代化 TypeScript 单页应用 |
 | **后端** | FastAPI | 高性能异步 API 框架 |
-| **智能体** | LangGraph | 智能体编排框架 |
+| **智能体** | AgentRunner | 自建异步智能体运行时 |
 | **LLM** | Claude OpenAI | 主要语言模型 |
 | **工具** | Tavily | Web 搜索/提取/爬取 |
 | **其他** | Docker, python-dotenv | 容器化与配置管理 |
@@ -106,23 +106,27 @@ cp .env.sample .env
 
 ```bash
 # 终端 1：启动后端
-uv run --project backend python app.py
+uv run --project backend python -m uvicorn chat_agents.main:app --app-dir backend/src --reload
 
-# 终端 2：启动前端
-uv run --project backend streamlit run streamlit_app.py
+# 终端 2：启动 React 前端
+npm --prefix frontend run dev
 ```
 
-**方法 B：使用 Docker Compose**
+**方法 B：使用 Docker Compose 启动数据库和后端**
 
 ```bash
-docker-compose up -d --build
+docker compose up -d --build
+
+# 另一个终端启动 React 前端
+npm --prefix frontend run dev
 ```
 
 #### 5. 访问应用
 
-- **前端**: http://localhost:8501
-- **后端 API**: http://localhost:8080
-- **API 文档**: http://localhost:8080/docs
+- **前端**: http://localhost:5173
+- **Docker 后端 API**: http://localhost:19180
+- **Docker API 文档**: http://localhost:19180/docs
+- **本地直接启动后端时**: http://localhost:8080
 
 ### 🚢 生产环境部署（宿主 nginx + Docker 后端）
 
@@ -181,35 +185,18 @@ curl -I https://agent.ellisyuan.com/s/00000000-0000-0000-0000-000000000000
 ### 基本使用
 
 1. **配置 API 密钥**
-   - 在侧边栏输入 Claude 和 Tavily API 密钥
-   - 或在 `.env` 文件中预先配置
+   - 在 `.env` 文件中配置 Claude、OpenAI 和 Tavily API 密钥
+   - 前端通过后端 API 使用这些配置，不在浏览器中保存密钥
 
-2. **选择智能体模式**
-   - **⚡ 快速模式**: 适合简单问题，快速响应
-     - 使用 `basic` 搜索深度，速度快、成本低
-     - 返回 3 条搜索结果（平衡配置）
-     - 爬取限制：5 个页面
-     - 不包含图片（减少响应体积）
-     - TavilySearch 和 TavilyExtract 均使用基础级别
-   - **🧠 深度思考模式**: 适合复杂查询，深度研究
-     - 使用 `advanced` 搜索深度，结果更全面但成本更高
-     - 返回 5 条搜索结果
-     - 爬取限制：15 个页面
-     - 包含图片（支持视觉内容）
-     - TavilySearch 和 TavilyExtract 均使用高级级别
-   - **🎯 高级参数支持**:
-     - `topic`: 搜索主题分类（general/news/finance）
-     - `time_range`: 时间范围过滤（day/week/month/year）
+2. **开始对话**
+   - 在 React 前端创建或选择会话
+   - 输入问题并发送，实时接收流式回复
+   - 通过模型选择和高级选项调整请求
 
-3. **选择 Claude 模型**
-   - **Haiku**: 快速且经济
-   - **Sonnet**: 平衡性能（推荐）
-   - **Opus**: 最强性能
-
-4. **开始对话**
-   - 在输入框输入问题
-   - 实时查看工具调用过程
-   - 获取带引用的详细答案
+3. **查看执行过程**
+   - 在 trace 面板中查看模型调用、工具调用和耗时
+   - Tavily 工具支持搜索、网页内容提取和深度爬取
+   - 会话列表保留历史会话，便于继续工作
 
 ### 高级功能
 
@@ -217,9 +204,8 @@ curl -I https://agent.ellisyuan.com/s/00000000-0000-0000-0000-000000000000
 
 智能体会根据问题自动选择合适的工具：
 
-- **🔍 TavilySearch**: 搜索相关网页
-- **📄 TavilyExtract**: 提取网页内容
-- **🕷️ TavilyCrawl**: 深度爬取网站
+- **🔍 web_search**: 搜索相关网页
+- **📄 web_reader**: 读取网页和 PDF 内容
 
 每个工具调用都会在 UI 中实时展示：
 - 工具名称和类型
@@ -246,48 +232,30 @@ curl -I https://agent.ellisyuan.com/s/00000000-0000-0000-0000-000000000000
 
 ### 智能体配置
 
-在 `streamlit_app.py` 中可自定义：
-
-```python
-# 请求频率限制
-MIN_TIME_BETWEEN_REQUESTS = datetime.timedelta(seconds=1)
-
-# 对话历史长度
-HISTORY_LENGTH = 10
-
-# 后端 URL
-BACKEND_URL = "http://localhost:8080"
-```
-
-在 `backend/llm_config.py` 中可添加新的 LLM 模型。
+后端配置集中在 `backend/config/endpoints.yaml` 和环境变量中；模型清单与高级选项由后端 API 提供，React 前端据此渲染选择控件。开发时可通过 `VITE_BACKEND_ORIGIN` 覆盖前端代理的后端地址。
 
 ## 📁 项目结构
 
 ```
 intelligent-chatbot/
-├── backend/                    # 后端模块
-│   ├── __init__.py
-│   ├── agent.py               # Web 智能体（LangGraph）
-│   ├── llm_config.py          # LLM 配置管理
-│   ├── prompts.py             # 提示词模板
-│   ├── session_manager.py     # 会话管理器
-│   └── utils.py               # 工具函数
-├── docs/                       # 文档目录
-│   └── TAVILY_PARAMETERS.md   # Tavily 参数说明
-├── .streamlit/                 # Streamlit 配置
-├── app.py                      # FastAPI 后端服务器
-├── streamlit_app.py            # Streamlit 前端应用
-├── backend/pyproject.toml      # Python 项目元数据
-├── backend/uv.lock             # 锁定依赖
-├── .env                        # 环境变量（本地）
-├── .env.sample                 # 环境变量示例
-├── .gitignore                  # Git 忽略文件
-├── Dockerfile                  # Docker 镜像
-├── docker-compose.yml          # Docker Compose 配置
-├── frontend/                   # 前端资源
-│   └── public/favicon.ico      # 网站图标
-├── README.md                   # 项目文档（中文）
-└── README_EN.md                # 项目文档（英文）
+├── backend/
+│   ├── src/chat_agents/        # FastAPI、AgentRunner 与领域模块
+│   ├── tests/                  # 后端测试
+│   ├── config/endpoints.yaml   # endpoint 配置
+│   ├── pyproject.toml          # Python 项目元数据
+│   └── uv.lock                 # 锁定依赖
+├── frontend/                   # React + Vite 单页应用
+│   ├── src/                    # 页面、组件与 API 客户端
+│   └── public/                 # 静态资源
+├── docs/                       # 文档与 ADR
+├── deploy/                     # Nginx 与发布配置
+├── compose.yaml                # 本地 Docker Compose 配置
+├── .env                       # 环境变量（本地）
+├── .env.sample                # 环境变量示例
+├── .gitignore                 # Git 忽略文件
+├── scripts/                   # 开发与发布脚本
+├── README.md                 # 项目文档（中文）
+└── README_EN.md              # 项目文档（英文）
 ```
 
 ## 🎯 功能演示
@@ -306,18 +274,18 @@ intelligent-chatbot/
 **用户**: 当前最新的 AI 技术趋势是什么？
 
 **智能体**:
-1. 🔍 调用 TavilySearch（topic=news, time_range=month）
+1. 🔍 调用 `web_search`（topic=news, time_range=month）
 2. 📊 展示搜索结果
 3. 💬 生成带引用的答案
 
 ### 示例对话 3：深度研究（深度思考模式）
 
-**用户**: 分析一下 LangChain 和 LangGraph 的区别，并给出使用建议
+**用户**: 分析一下不同 Agent framework 的区别，并给出使用建议
 
 **智能体**:
-1. 🔍 搜索 LangChain 官方文档
+1. 🔍 搜索相关官方文档
 2. 📄 提取关键页面内容
-3. 🔍 搜索 LangGraph 文档
+3. 🔍 交叉搜索更多资料
 4. 📄 提取对比信息
 5. 🧠 深度分析并生成详细报告
 
@@ -398,7 +366,7 @@ PORT=8081
   - OpenAI: `sk-proj-...`
 - 确认密钥未过期且有足够配额
 - 检查 `.env` 文件是否正确加载
-- Docker 用户：确认 `docker-compose.yml` 中的环境变量映射
+- Docker 用户：确认 `compose.yaml` 中的环境变量映射
 
 ```bash
 # 测试环境变量加载
@@ -414,7 +382,7 @@ python -c "from dotenv import load_dotenv; import os; load_dotenv(); print(os.ge
 **解决方案**:
 - 检查网络连接（特别是防火墙/代理）
 - 确认 Tavily API 配额充足
-- 检查后端日志：`docker logs chatbot-backend -f`
+- 检查后端日志：`docker compose logs backend -f`
 - 降低并发请求数量或增加超时时间
 
 #### 7. 流式响应中断
@@ -433,27 +401,24 @@ python -c "from dotenv import load_dotenv; import os; load_dotenv(); print(os.ge
 
 **问题**：重启容器后对话记录消失
 
-**原因**：未挂载数据目录
+**原因**：PostgreSQL 使用的 named volume 被删除，或迁移服务未成功执行。
 
 **解决方案**：
 
-确保 `docker-compose.yml` 包含数据卷：
+`compose.yaml` 已通过 `postgres-data` 持久化 PostgreSQL 数据。正常重启不要使用 `docker compose down -v`：
 
-```yaml
-backend:
-  volumes:
-    - ./data:/app/data  # 持久化会话数据
-```
-
-恢复数据：
 ```bash
-# 备份现有数据
-docker cp chatbot-backend:/app/data ./data-backup
-
-# 或在 docker-compose.yml 中添加 volume 后重启
-docker-compose down
-docker-compose up -d
+docker compose down
+docker compose up -d --build
 ```
+
+备份数据库：
+
+```bash
+docker compose exec postgres pg_dump -U postgres -d chat_agents > chat_agents.sql
+```
+
+恢复数据库前先确认服务已停止，再按 PostgreSQL 工具的恢复流程导入 `chat_agents.sql`。
 
 ### 性能问题
 
@@ -470,8 +435,8 @@ docker-compose up -d
 
 ```bash
 # Docker 日志
-docker logs chatbot-backend --tail 100 -f
-docker logs chatbot-frontend --tail 100 -f
+docker compose logs backend --tail 100 -f
+docker compose logs postgres --tail 100 -f
 
 # Nginx 日志
 sudo tail -f /var/log/nginx/chatbot.access.log
@@ -479,10 +444,10 @@ sudo tail -f /var/log/nginx/chatbot.error.log
 
 # 查看所有容器状态
 docker ps -a
-docker stats chatbot-backend chatbot-frontend
+docker compose ps
 ```
 
-**更多问题？** 请查看 [故障排查完整指南](./docs/TROUBLESHOOTING.md)
+更多问题请先查看 backend 与数据库容器的日志。
 
 ## 🔮 未来计划
 
@@ -529,10 +494,8 @@ uv run --project backend mypy --config-file=backend/pyproject.toml backend
 
 本项目基于以下开源项目构建：
 
-- [Streamlit](https://streamlit.io/) - 简洁的 Python Web 框架
 - [FastAPI](https://fastapi.tiangolo.com/) - 高性能 API 框架
 - [LangChain](https://www.langchain.com/) - LLM 应用框架
-- [LangGraph](https://langchain-ai.github.io/langgraph/) - 智能体编排框架
 - [Anthropic Claude](https://www.anthropic.com/) - 强大的语言模型
 - [Tavily](https://tavily.com/) - AI 优化的搜索 API
 

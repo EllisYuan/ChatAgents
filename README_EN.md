@@ -5,7 +5,7 @@
 **An intelligent agent assistant integrated with Web search, content extraction, and deep thinking capabilities**
 
 ![Python](https://img.shields.io/badge/Python-3.11--3.12-blue.svg)
-![Streamlit](https://img.shields.io/badge/Streamlit-1.32+-red.svg)
+![React](https://img.shields.io/badge/React-19+-61DAFB.svg)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.109+-green.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
 
@@ -19,21 +19,21 @@
 
 This is an intelligent chatbot with web search capabilities featuring:
 
-1. **Simple Chatbot** (based on Streamlit + Claude)
-2. **Tavily Web Agent** (based on LangGraph + Tavily)
+1. **Intelligent Chatbot** (based on React + Claude)
+2. **Tavily Web Agent** (based on AgentRunner + Tavily)
 
-Through a hybrid architecture (Streamlit frontend + FastAPI backend), it provides powerful web search, content extraction, and deep thinking capabilities.
+Through a React + FastAPI + AgentRunner + Tavily architecture, it provides powerful web search, content extraction, and deep thinking capabilities.
 
 ## ✨ Features
 
 ### 🎯 Core Features
-- **💬 Interactive Chat Interface**: Clean and intuitive UI based on Streamlit
+- **💬 Interactive Chat Interface**: React UI with sessions, streaming replies, and model selection
 - **🔍 Real-time Web Search**: Search for latest information via Tavily
 - **📄 Web Content Extraction**: Precise extraction of key content from web pages
 - **🕷️ Deep Website Crawling**: Deep crawling of nested website links
 - **🧠 Deep Thinking Mode**: Supports deep reasoning for complex queries
 - **⚡ Fast Response Mode**: Quick answers for simple questions
-- **💭 Conversation Memory**: Conversation history management based on LangGraph
+- **💭 Conversation Memory**: Conversation history management through FastAPI and PostgreSQL
 - **🔄 Streaming Response**: Real-time streaming output for better interaction experience
 
 ### 🛠️ Advanced Features
@@ -53,9 +53,9 @@ Through a hybrid architecture (Streamlit frontend + FastAPI backend), it provide
 
 | Layer | Technology | Description |
 |------|------|------|
-| **Frontend** | Streamlit | Simple Python web framework |
+| **Frontend** | React + Vite | Modern TypeScript single-page application |
 | **Backend** | FastAPI | High-performance async API framework |
-| **Agent** | LangGraph | Agent orchestration framework |
+| **Agent** | AgentRunner | Custom async agent runtime |
 | **LLM** | Claude OpenAI | Primary language model |
 | **Tools** | Tavily | Web search/extract/crawl |
 | **Others** | Docker, python-dotenv | Containerization and configuration management |
@@ -109,58 +109,45 @@ cp .env.sample .env
 
 ```bash
 # Terminal 1: Start backend
-uv run --project backend python app.py
+uv run --project backend python -m uvicorn chat_agents.main:app --app-dir backend/src --reload
 
-# Terminal 2: Start frontend
-uv run --project backend streamlit run streamlit_app.py
+# Terminal 2: Start React frontend
+npm --prefix frontend run dev
 ```
 
-**Method B: Use Docker Compose**
+**Method B: Start the database and backend with Docker Compose**
 
 ```bash
-docker-compose up --build
+docker compose up -d --build
+
+# In another terminal, start the React frontend
+npm --prefix frontend run dev
 ```
 
 #### 5. Access the Application
 
-- **Frontend**: http://localhost:8501
-- **Backend API**: http://localhost:8080
-- **API Docs**: http://localhost:8080/docs
+- **Frontend**: http://localhost:5173
+- **Docker backend API**: http://localhost:19180
+- **Docker API docs**: http://localhost:19180/docs
+- **When running the backend directly**: http://localhost:8080
 
 ## 📖 Usage Guide
 
 ### Basic Usage
 
 1. **Configure API Keys**
-   - Enter Claude and Tavily API keys in the sidebar
-   - Or pre-configure in `.env` file
+   - Configure Claude, OpenAI, and Tavily API keys in `.env`
+   - The frontend uses these settings through the backend API and never stores keys in the browser
 
-2. **Select Agent Mode**
-   - **⚡ Fast Mode**: For simple questions, quick response
-     - Uses `basic` search depth, faster and more cost-effective
-     - Returns 3 search results (balanced configuration)
-     - Crawl limit: 5 pages
-     - No images (reduces response size)
-     - Both TavilySearch and TavilyExtract use basic level
-   - **🧠 Deep Thinking Mode**: For complex queries, in-depth research
-     - Uses `advanced` search depth, more comprehensive but higher cost
-     - Returns 5 search results
-     - Crawl limit: 15 pages
-     - Includes images (supports visual content)
-     - Both TavilySearch and TavilyExtract use advanced level
-   - **🎯 Advanced Parameters Support**:
-     - `topic`: Search topic classification (general/news/finance)
-     - `time_range`: Time range filtering (day/week/month/year)
+2. **Start a Conversation**
+   - Create or select a session in the React frontend
+   - Send a question and receive the reply as a stream
+   - Adjust the model and advanced options for each request
 
-3. **Choose Claude Model**
-   - **Haiku**: Fast and economical
-   - **Sonnet**: Balanced performance (Recommended)
-   - **Opus**: Best performance
-
-4. **Start Conversation**
-   - Enter your question in the input box
-   - View tool call processes in real-time
-   - Get detailed answers with citations
+3. **Inspect Execution**
+   - Use the trace panel to inspect model calls, tool calls, and timings
+   - Tavily tools support search, page extraction, and deep crawling
+   - The session list keeps previous conversations available
 
 ### Advanced Features
 
@@ -168,9 +155,8 @@ docker-compose up --build
 
 The agent automatically selects appropriate tools based on the question:
 
-- **🔍 TavilySearch**: Search relevant web pages
-- **📄 TavilyExtract**: Extract web page content
-- **🕷️ TavilyCrawl**: Deep crawl websites
+- **🔍 web_search**: Search relevant web pages
+- **📄 web_reader**: Read web pages and PDF content
 
 Each tool call is displayed in real-time in the UI:
 - Tool name and type
@@ -197,50 +183,30 @@ Each tool call is displayed in real-time in the UI:
 
 ### Agent Configuration
 
-Customizable in `streamlit_app.py`:
-
-```python
-# Request rate limit
-MIN_TIME_BETWEEN_REQUESTS = datetime.timedelta(seconds=1)
-
-# Conversation history length
-HISTORY_LENGTH = 10
-
-# Backend URL
-BACKEND_URL = "http://localhost:8080"
-```
-
-New LLM models can be added in `backend/llm_config.py`.
+Backend configuration is defined in `backend/config/endpoints.yaml` and environment variables. The backend API provides the model catalog and advanced options used by the React controls. Set `VITE_BACKEND_ORIGIN` to override the backend origin used by the frontend dev proxy.
 
 ## 📁 Project Structure
 
 ```
 intelligent-chatbot/
-├── backend/                    # Backend module
-│   ├── __init__.py
-│   ├── agent.py               # Web agent (LangGraph)
-│   ├── llm_config.py          # LLM configuration management
-│   ├── prompts.py             # Prompt templates
-│   ├── session_manager.py     # Session manager
-│   └── utils.py               # Utility functions
-├── docs/                       # Documentation directory
-│   └── TAVILY_PARAMETERS.md   # Tavily parameters documentation
-├── .streamlit/                 # Streamlit configuration
-├── app.py                      # FastAPI backend server
-├── streamlit_app.py            # Streamlit frontend application
-├── backend/pyproject.toml      # Python project metadata
-├── backend/uv.lock             # Locked dependencies
-├── .env                        # Environment variables (local)
-├── .env.sample                 # Environment variable example
-├── .gitignore                  # Git ignore file
-├── Dockerfile                  # Docker image
-├── docker-compose.yml          # Docker Compose configuration
-├── frontend/                   # Frontend assets
-│   └── public/favicon.ico      # Website icon
-├── setup.bat                   # Windows setup script
-├── start.bat                   # Windows startup script
-├── README.md                   # Project documentation (Chinese)
-└── README_EN.md                # Project documentation (English)
+├── backend/
+│   ├── src/chat_agents/        # FastAPI, AgentRunner, and domain modules
+│   ├── tests/                  # Backend tests
+│   ├── config/endpoints.yaml   # Endpoint configuration
+│   ├── pyproject.toml          # Python project metadata
+│   └── uv.lock                 # Locked dependencies
+├── frontend/                   # React + Vite single-page application
+│   ├── src/                    # Pages, components, and API client
+│   └── public/                 # Static assets
+├── docs/                       # Documentation and ADRs
+├── deploy/                     # Nginx and release configuration
+├── compose.yaml                # Local Docker Compose configuration
+├── .env                       # Environment variables (local)
+├── .env.sample                # Environment variable example
+├── .gitignore                 # Git ignore file
+├── scripts/                   # Development and release scripts
+├── README.md                  # Project documentation (Chinese)
+└── README_EN.md               # Project documentation (English)
 ```
 
 ## 🎯 Feature Demonstrations
@@ -259,18 +225,18 @@ intelligent-chatbot/
 **User**: What are the latest AI technology trends?
 
 **Agent**:
-1. 🔍 Call TavilySearch (topic=news, time_range=month)
+1. 🔍 Call `web_search` (topic=news, time_range=month)
 2. 📊 Display search results
 3. 💬 Generate answer with citations
 
 ### Example Conversation 3: In-depth Research (Deep Thinking Mode)
 
-**User**: Analyze the differences between LangChain and LangGraph, and provide usage recommendations
+**User**: Analyze the differences between popular Agent frameworks, and provide usage recommendations
 
 **Agent**:
-1. 🔍 Search LangChain official documentation
+1. 🔍 Search relevant official documentation
 2. 📄 Extract key page content
-3. 🔍 Search LangGraph documentation
+3. 🔍 Cross-check additional sources
 4. 📄 Extract comparison information
 5. 🧠 Deep analysis and generate detailed report
 
@@ -287,7 +253,7 @@ netstat -ano | findstr :8080  # Windows
 lsof -i :8080                 # macOS/Linux
 
 # Ensure backend is started
-python app.py
+uv run --project backend python -m uvicorn chat_agents.main:app --app-dir backend/src
 ```
 
 ### 2. API Key Error
@@ -299,7 +265,7 @@ python app.py
   - Claude: `sk-ant-api-...`
   - Tavily: `tvly-...`
 - Confirm key is not expired and has sufficient quota
-- Check `.env` file or sidebar input
+- Check the `.env` file and restart the backend if configuration changed
 
 ### 3. Tool Call Failure
 
@@ -316,7 +282,7 @@ python app.py
 
 **Solution**:
 - Increase request timeout
-- Check backend logs (`app.py` output)
+- Check backend logs or the container logs
 - Confirm LLM quota is sufficient
 
 ## 🔮 Future Plans
@@ -358,10 +324,8 @@ This project is open-sourced under the [MIT License](LICENSE).
 
 This project is built on the following open-source projects:
 
-- [Streamlit](https://streamlit.io/) - Simple Python web framework
 - [FastAPI](https://fastapi.tiangolo.com/) - High-performance API framework
 - [LangChain](https://www.langchain.com/) - LLM application framework
-- [LangGraph](https://langchain-ai.github.io/langgraph/) - Agent orchestration framework
 - [Anthropic Claude](https://www.anthropic.com/) - Powerful language model
 - [Tavily](https://tavily.com/) - AI-optimized search API
 
