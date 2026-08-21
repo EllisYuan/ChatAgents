@@ -22,7 +22,7 @@ from uuid import UUID, uuid4
 
 import httpx
 import structlog
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
@@ -33,6 +33,7 @@ from .agent.runner import AgentRunner
 from .api_models import (
     HealthResponse,
     ModelItemView,
+    ModelProfilesResponse,
     ModelProfileView,
     ModelRefreshRequest,
     ModelRefreshResponse,
@@ -59,7 +60,7 @@ from .observability.router import router as observability_router
 from .observability.streaming import observe
 from .transport.custom_events import SpanPayload, TitlePayload, ToolResultPayload, UsagePayload
 from .transport.sse import encode_sse
-from .validation import MAX_MESSAGE_LENGTH, validate_non_blank
+from .validation import MAX_MESSAGE_LENGTH, MAX_PROFILE_NAME_LENGTH, validate_non_blank
 
 configure_logging()
 logger = structlog.get_logger(__name__)
@@ -235,12 +236,31 @@ async def _default_profile_context() -> tuple[Any, dict[str, Any], dict[str, Any
     return config, available, unavailable
 
 
+@app.get("/api/models/profiles", response_model=ModelProfilesResponse, tags=["models"])
+async def list_model_profiles() -> ModelProfilesResponse:
+    """枚举服务端已配置的端点档案（issue #70）；前端据此渲染档案选择槽位。"""
+
+    config, available, unavailable = await _default_profile_context()
+    return ModelProfilesResponse(
+        profiles=[
+            ModelProfileView(name=name, status="available")
+            for name in config.profiles
+            if name in available
+        ]
+        + [
+            ModelProfileView(name=name, status="unavailable", reason=profile.reason)
+            for name, profile in unavailable.items()
+        ]
+    )
+
+
 @app.get("/api/models", response_model=ModelsResponse, tags=["models"])
 async def list_models(
     store: Annotated[SqlAlchemyModelCatalogStore, Depends(get_model_catalog_store)],
+    endpoint_profile: Annotated[str | None, Query(max_length=MAX_PROFILE_NAME_LENGTH)] = None,
 ) -> ModelsResponse:
-    config, _, unavailable = await _default_profile_context()
-    profile_name = config.default_profile
+    config, available, unavailable = await _default_profile_context()
+    profile_name = endpoint_profile or config.default_profile
     unavailable_profile = unavailable.get(profile_name)
     if unavailable_profile is not None:
         return _models_response(
@@ -253,6 +273,8 @@ async def list_models(
             last_success_at=None,
             error=None,
         )
+    if profile_name not in available:
+        raise ProtocolError(f"未知端点档案：{profile_name}")
 
     models, last_success_at = await store.load(profile_name)
     return _models_response(

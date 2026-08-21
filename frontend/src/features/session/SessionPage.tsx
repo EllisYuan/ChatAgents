@@ -3,6 +3,8 @@ import { useParams } from "react-router-dom";
 
 import { TracePanel } from "../trace/TracePanel";
 import { useUiStore } from "../../stores/ui-store";
+import { AdvancedOptions } from "./AdvancedOptions";
+import { EffortSwitcher, type EffortTier } from "./EffortSwitcher";
 import { useAgentRun } from "./useAgentRun";
 
 export function SessionPage() {
@@ -22,13 +24,15 @@ export function SessionPage() {
     sendMessage,
   } = useAgentRun(sessionId);
   const [draft, setDraft] = useState("");
+  const [effort, setEffort] = useState<EffortTier>("medium");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!draft.trim() || phase === "streaming") {
       return;
     }
-    void sendMessage(draft);
+    void sendMessage(draft, effort);
     setDraft("");
   };
 
@@ -89,6 +93,18 @@ export function SessionPage() {
               ))}
             </ol>
           )}
+
+          <div className="composer-toolbar">
+            <EffortSwitcher value={effort} onChange={setEffort} disabled={phase === "streaming"} />
+            <button
+              className="text-button"
+              type="button"
+              onClick={() => setAdvancedOpen((open) => !open)}
+            >
+              {advancedOpen ? "收起高级选项" : "高级选项"}
+            </button>
+          </div>
+          {advancedOpen && <AdvancedOptions disabled={phase === "streaming"} />}
 
           <form className="composer" onSubmit={handleSubmit} aria-label="发送消息">
             <textarea

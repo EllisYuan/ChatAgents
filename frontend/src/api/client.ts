@@ -3,12 +3,50 @@ import type { components, paths } from "../generated/api";
 type ModelsResponse =
   paths["/api/models"]["get"]["responses"][200]["content"]["application/json"];
 
-export async function getModels(): Promise<ModelsResponse> {
-  const response = await fetch("/api/models");
+/** 不传 `endpointProfile` 时读服务端 `default_profile`（issue #70：档案切换）。 */
+export async function getModels(endpointProfile?: string): Promise<ModelsResponse> {
+  const query = new URLSearchParams();
+  if (endpointProfile) {
+    query.set("endpoint_profile", endpointProfile);
+  }
+  const queryString = query.toString();
+  const response = await fetch(`/api/models${queryString ? `?${queryString}` : ""}`);
   if (!response.ok) {
     throw new Error(`获取模型清单失败：${response.status}`);
   }
   return (await response.json()) as ModelsResponse;
+}
+
+export type ModelProfileView = components["schemas"]["ModelProfileView"];
+
+/** 服务端已配置的端点档案（issue #70）——档案选择槽位据此渲染，不硬编码档案名。 */
+export async function getModelProfiles(): Promise<ModelProfileView[]> {
+  const response = await fetch("/api/models/profiles");
+  if (!response.ok) {
+    throw new Error(`获取端点档案失败：${response.status}`);
+  }
+  const body = (await response.json()) as components["schemas"]["ModelProfilesResponse"];
+  return body.profiles ?? [];
+}
+
+export type ModelRefreshRequest = components["schemas"]["ModelRefreshRequest"];
+export type ModelRefreshResponse = components["schemas"]["ModelRefreshResponse"];
+
+/**
+ * 「下载模型」的唯一入口——预设档案刷新落库，自定义端点只回一次性结果
+ * （ADR-0016）。拉取本身兼任用户自填密钥的验证位（ADR-0029）。
+ */
+export async function refreshModels(request: ModelRefreshRequest): Promise<ModelRefreshResponse> {
+  const response = await fetch("/api/models/refresh", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) {
+    const problem = (await response.json()) as components["schemas"]["ProblemDetails"];
+    throw new Error(problem.detail || problem.title);
+  }
+  return (await response.json()) as ModelRefreshResponse;
 }
 
 export type EvalSummary =

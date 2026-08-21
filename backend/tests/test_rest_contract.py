@@ -110,6 +110,89 @@ def test_models_contract_distinguishes_unavailable_profile_from_empty_catalog(
         main_module.app.dependency_overrides.pop(main_module.get_model_catalog_store, None)
 
 
+def test_model_profiles_lists_available_and_unavailable(monkeypatch: Any) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    async def scenario() -> None:
+        async with _client() as client:
+            response = await client.get("/api/models/profiles")
+        assert response.status_code == 200
+        assert response.json() == {
+            "profiles": [
+                {"name": "anthropic-official", "status": "available", "reason": None},
+                {
+                    "name": "openai-official",
+                    "status": "unavailable",
+                    "reason": "环境变量 OPENAI_API_KEY 未设置",
+                },
+            ]
+        }
+
+    asyncio.run(scenario())
+
+
+class _MultiProfileStore:
+    """接受任意档案名的假 store，供档案切换测试使用。"""
+
+    def __init__(self, catalogs: dict[str, tuple[tuple[ModelItem, ...], datetime | None]]) -> None:
+        self._catalogs = catalogs
+
+    async def load(self, endpoint_profile: str) -> tuple[tuple[ModelItem, ...], datetime | None]:
+        return self._catalogs.get(endpoint_profile, ((), None))
+
+    async def replace(
+        self, endpoint_profile: str, models: tuple[ModelItem, ...], discovered_at: datetime
+    ) -> None:
+        self._catalogs[endpoint_profile] = (models, discovered_at)
+
+
+def test_models_contract_switches_profile_via_query_param(monkeypatch: Any) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    store = _MultiProfileStore(
+        {"openai-official": ((ModelItem(model_id="gpt-5.1", owned_by="openai"),), None)}
+    )
+    main_module.app.dependency_overrides[main_module.get_model_catalog_store] = lambda: store
+
+    async def scenario() -> None:
+        async with _client() as client:
+            response = await client.get(
+                "/api/models", params={"endpoint_profile": "openai-official"}
+            )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["endpoint_profile"] == "openai-official"
+        assert body["models"] == [
+            {"id": "gpt-5.1", "owned_by": "openai", "endpoint_profile": "openai-official"}
+        ]
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        main_module.app.dependency_overrides.pop(main_module.get_model_catalog_store, None)
+
+
+def test_models_contract_rejects_unknown_endpoint_profile(monkeypatch: Any) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    store = _MultiProfileStore({})
+    main_module.app.dependency_overrides[main_module.get_model_catalog_store] = lambda: store
+
+    async def scenario() -> None:
+        async with _client() as client:
+            response = await client.get(
+                "/api/models", params={"endpoint_profile": "does-not-exist"}
+            )
+        assert response.status_code == 400
+        assert response.json()["type"] == "protocol_error"
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        main_module.app.dependency_overrides.pop(main_module.get_model_catalog_store, None)
+
+
 def test_problem_details_contains_rfc9457_extensions() -> None:
     async def scenario() -> None:
         async with _client() as client:

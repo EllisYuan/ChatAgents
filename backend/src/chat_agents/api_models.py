@@ -51,6 +51,12 @@ class ModelProfileView(BaseModel):
     reason: str | None = None
 
 
+class ModelProfilesResponse(BaseModel):
+    """服务端已配置的全部端点档案及其可用性（issue #70：前端选单需要枚举档案）。"""
+
+    profiles: list[ModelProfileView] = Field(default_factory=list)
+
+
 class ModelsResponse(BaseModel):
     models: list[ModelItemView] = Field(default_factory=list)
     endpoint_profile: str

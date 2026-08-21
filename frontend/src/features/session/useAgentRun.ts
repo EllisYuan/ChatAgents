@@ -5,6 +5,7 @@ import { useSessionListStore } from "../../stores/session-list-store";
 import { useTraceStream } from "../trace/useTraceStream";
 import { streamRun } from "./agui-stream";
 import type { ChatMessage, RunSummary } from "./chat-types";
+import type { EffortTier } from "./EffortSwitcher";
 import { historyToMessages } from "./history";
 
 type RunPhase = "idle" | "streaming";
@@ -64,7 +65,7 @@ export function useAgentRun(sessionId: string) {
   useEffect(() => () => abortRef.current?.abort(), []);
 
   const sendMessage = useCallback(
-    async (text: string) => {
+    async (text: string, effort: EffortTier = "medium") => {
       const trimmed = text.trim();
       if (!trimmed || phase === "streaming") {
         return;
@@ -98,7 +99,7 @@ export function useAgentRun(sessionId: string) {
 
       try {
         await streamRun(
-          { session_id: sessionId, message: trimmed, effort: "medium" },
+          { session_id: sessionId, message: trimmed, effort },
           {
             onTextDelta(delta) {
               setMessages((prev) =>
