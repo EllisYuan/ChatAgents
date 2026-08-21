@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
@@ -13,6 +13,7 @@ import pytest
 from chat_agents import main as main_module
 from chat_agents.database import get_db
 from chat_agents.db.app import Message as MessageRow
+from chat_agents.db.app import PromptVersion, ToolSchemaVersion
 from chat_agents.db.app import Session as SessionRow
 from chat_agents.db.obs import Run, Span
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -20,7 +21,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from ..db_helpers import migrated_engine, session_factory_for
 
 
-def _override_db(factory: async_sessionmaker[AsyncSession]):
+def _override_db(
+    factory: async_sessionmaker[AsyncSession],
+) -> Callable[[], AsyncIterator[AsyncSession]]:
     async def dependency() -> AsyncIterator[AsyncSession]:
         async with factory() as session:
             yield session
@@ -39,7 +42,29 @@ async def _seed_observation(
     tool_id = uuid4()
     now = datetime.now(UTC)
     async with factory() as session, session.begin():
+        session.add(
+            PromptVersion(
+                version_id="prompt@1",
+                name="system",
+                content="test prompt",
+                content_hash="prompt000001",
+                variables=[],
+            )
+        )
+        session.add(
+            ToolSchemaVersion(
+                version_id="tools@1",
+                name="tools",
+                content="[]",
+                content_hash="tools0000001",
+                effort_tier="high",
+            )
+        )
+        await session.flush()
+
         session.add(SessionRow(id=session_id))
+        await session.flush()
+
         session.add(
             MessageRow(
                 id=trigger_id,
@@ -50,6 +75,8 @@ async def _seed_observation(
                 round_trip_payload=None,
             )
         )
+        await session.flush()
+
         session.add(
             Run(
                 id=run_id,

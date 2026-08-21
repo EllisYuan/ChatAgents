@@ -205,6 +205,7 @@ def test_tool_result_status_is_error_when_structured_is_none() -> None:
     tool_result_value = next(f for f in frames if f.get("name") == "chatagents.tool_result")[
         "value"
     ]
+    assert isinstance(tool_result_value, dict)
     assert tool_result_value["structured"] is None
     assert tool_result_value["status"] == "error"
 

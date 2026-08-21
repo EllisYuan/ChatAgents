@@ -97,7 +97,7 @@ class RunDetail(BaseModel):
 def _span_payload(span: SpanView) -> dict[str, Any]:
     """编码跨度并按协议删除结构性不存在的字段。"""
 
-    payload = span.model_dump(mode="json")
+    payload: dict[str, Any] = span.model_dump(mode="json")
     payload["children"] = [_span_payload(child) for child in span.children]
     if span._protocol == "openai_chat_completions":
         # Chat Completions 从不采集 reasoning；字段缺席本身就是契约信息。
@@ -114,6 +114,6 @@ def _span_payload(span: SpanView) -> dict[str, Any]:
 def run_detail_payload(detail: RunDetail) -> dict[str, Any]:
     """返回可直接交给 JSONResponse 的详情载荷。"""
 
-    payload = detail.model_dump(mode="json", exclude={"spans"})
+    payload: dict[str, Any] = detail.model_dump(mode="json", exclude={"spans"})
     payload["spans"] = [_span_payload(span) for span in detail.spans]
     return payload

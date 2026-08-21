@@ -76,7 +76,12 @@ def test_post_api_runs_streams_sse_and_persists_incrementally(
             factory = session_factory_for(engine)
             monkeypatch.setattr(main_module, "get_session_factory", lambda: factory)
 
-            port = _ScriptedPort([[ModelTextDelta(text="你好"), _completed("你好")]])
+            port = _ScriptedPort(
+                [
+                    [_completed("测试标题")],
+                    [ModelTextDelta(text="你好"), _completed("你好")],
+                ]
+            )
             fake_runner = AgentRunner(
                 tool_executor=ToolExecutor({}), model_port_factory=lambda _profile: port
             )
@@ -101,7 +106,9 @@ def test_post_api_runs_streams_sse_and_persists_incrementally(
             types = [f["type"] for f in frames]
             assert types[0] == "RUN_STARTED"
             assert "RUN_FINISHED" in types
+            assert "RUN_ERROR" not in types
             assert "TEXT_MESSAGE_CONTENT" in types
+            assert port.calls == 2
 
             async with factory() as session:
                 repository = ConversationRepository(session)

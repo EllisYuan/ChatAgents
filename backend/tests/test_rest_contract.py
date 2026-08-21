@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
@@ -10,8 +11,12 @@ from uuid import uuid4
 import httpx
 import pytest
 from chat_agents import main as main_module
+from chat_agents.database import get_db
 from chat_agents.model_catalog import ModelItem
 from chat_agents.validation import MAX_MESSAGE_LENGTH, MAX_TITLE_LENGTH
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from .db_helpers import migrated_engine, session_factory_for
 
 
 class _Store:
@@ -34,6 +39,16 @@ def _client() -> httpx.AsyncClient:
     return httpx.AsyncClient(
         transport=httpx.ASGITransport(app=main_module.app), base_url="http://test"
     )
+
+
+def _override_db(
+    factory: async_sessionmaker[AsyncSession],
+) -> Callable[[], AsyncIterator[AsyncSession]]:
+    async def dependency() -> AsyncIterator[AsyncSession]:
+        async with factory() as session:
+            yield session
+
+    return dependency
 
 
 def test_health_exposes_app_version_and_collection_post_is_absent(
@@ -224,6 +239,59 @@ def test_openapi_contains_rest_and_custom_payload_schemas() -> None:
         "ChatAgentsTitlePayload",
         "ProblemDetails",
     } <= schemas.keys()
+
+
+def test_session_cursor_query_schema_is_optional_but_not_nullable() -> None:
+    parameters = main_module.app.openapi()["paths"]["/api/sessions"]["get"]["parameters"]
+    cursor_parameters = {
+        parameter["name"]: parameter
+        for parameter in parameters
+        if parameter["name"] in {"before_updated_at", "before_id"}
+    }
+
+    assert set(cursor_parameters) == {"before_updated_at", "before_id"}
+    assert cursor_parameters["before_updated_at"]["required"] is False
+    assert cursor_parameters["before_updated_at"]["schema"]["format"] == "date-time"
+    assert cursor_parameters["before_id"]["required"] is False
+    assert cursor_parameters["before_id"]["schema"]["format"] == "uuid"
+    assert "null" not in str(cursor_parameters)
+
+
+@pytest.mark.db
+def test_session_cursor_requires_complete_pair_and_rejects_literal_null() -> None:
+    async def scenario() -> None:
+        async with migrated_engine("chat_agents_session_cursor") as engine:
+            factory = session_factory_for(engine)
+            main_module.app.dependency_overrides[get_db] = _override_db(factory)
+            try:
+                async with _client() as client:
+                    omitted = await client.get("/api/sessions")
+                    complete = await client.get(
+                        "/api/sessions",
+                        params={
+                            "before_updated_at": "2026-08-21T00:00:00Z",
+                            "before_id": str(uuid4()),
+                        },
+                    )
+                    incomplete = await client.get(
+                        "/api/sessions", params={"before_id": str(uuid4())}
+                    )
+                    null_timestamp = await client.get(
+                        "/api/sessions", params={"before_updated_at": "null"}
+                    )
+                    null_id = await client.get("/api/sessions", params={"before_id": "null"})
+            finally:
+                main_module.app.dependency_overrides.pop(get_db, None)
+
+        assert omitted.status_code == 200
+        assert complete.status_code == 200
+        for response in (incomplete, null_timestamp, null_id):
+            assert response.status_code == 400
+            assert response.headers["content-type"].startswith("application/problem+json")
+            assert response.json()["type"] == "protocol_error"
+        assert "before_updated_at" in incomplete.json()["detail"]
+
+    asyncio.run(scenario())
 
 
 @pytest.mark.parametrize(

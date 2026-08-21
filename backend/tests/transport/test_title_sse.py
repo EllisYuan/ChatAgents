@@ -56,6 +56,7 @@ def test_title_generated_is_a_custom_event_with_auxiliary_usage() -> None:
         "title": "Python 入门",
     }
     usage = next(frame for frame in frames if frame.get("name") == "chatagents.usage")
+    assert isinstance(usage["value"], dict)
     assert usage["value"]["role"] == "auxiliary"
     assert title_index < next(
         i for i, frame in enumerate(frames) if frame["type"] == "RUN_FINISHED"

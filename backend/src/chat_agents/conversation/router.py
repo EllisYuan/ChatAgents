@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
-from ..exceptions import SessionNotFound
+from ..exceptions import ProtocolError, SessionNotFound
 from .models import (
     MessageView,
     RenameSessionRequest,
@@ -25,6 +25,8 @@ from .service import ConversationService
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 Db = Annotated[AsyncSession, Depends(get_db)]
+_OPTIONAL_DATETIME_DEFAULT = cast(datetime, None)
+_OPTIONAL_UUID_DEFAULT = cast(UUID, None)
 
 
 def _service(session: AsyncSession) -> ConversationService:
@@ -35,9 +37,11 @@ def _service(session: AsyncSession) -> ConversationService:
 async def list_sessions(
     session: Db,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
-    before_updated_at: datetime | None = None,
-    before_id: UUID | None = None,
+    before_updated_at: Annotated[datetime, Query()] = _OPTIONAL_DATETIME_DEFAULT,
+    before_id: Annotated[UUID, Query()] = _OPTIONAL_UUID_DEFAULT,
 ) -> list[SessionSummary]:
+    if before_id is not None and before_updated_at is None:
+        raise ProtocolError("before_id 必须与 before_updated_at 同时提供")
     return await _service(session).list_sessions(
         limit=limit, before_updated_at=before_updated_at, before_id=before_id
     )

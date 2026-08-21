@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 
 import httpx
@@ -13,7 +13,7 @@ from chat_agents.eval_summary.router import get_eval_summary_store
 from chat_agents.eval_summary.store import EvalSummaryStore
 
 
-def _override_store(store: EvalSummaryStore):
+def _override_store(store: EvalSummaryStore) -> Callable[[], AsyncIterator[EvalSummaryStore]]:
     async def dependency() -> AsyncIterator[EvalSummaryStore]:
         yield store
 

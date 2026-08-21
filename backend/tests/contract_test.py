@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
+
 import pytest
 import schemathesis
 from chat_agents.main import app
@@ -10,9 +12,11 @@ from hypothesis import seed, settings
 
 @pytest.fixture
 def api_schema() -> object:
-    return schemathesis.openapi.from_asgi("/openapi.json", app).include(
-        path="/health", method="GET"
-    )
+    document = deepcopy(app.openapi())
+    document["paths"] = {"/health": document["paths"]["/health"]}
+    schema = schemathesis.openapi.from_dict(document)
+    schema.app = app
+    return schema
 
 
 # 只在契约门禁中跑非流式健康端点；完整 REST 运行由带真 Postgres 的 CI job 执行。
