@@ -229,8 +229,6 @@ jobs:
     defaults:
       run:
         working-directory: frontend
-    env:
-      OPENAPI_INPUT: ${{ runner.temp }}/chatagents-openapi.json
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -249,9 +247,15 @@ jobs:
         run: npm ci
       - name: Run frontend lint
         run: npm run lint
+      # OPENAPI_INPUT 只能落在 step 级：runner context 在 job 级 env 里不可用，
+      # 写在那儿会让整份 workflow 判为无效（零 job 运行，且报错不指向具体行）。
       - name: Check frontend types
+        env:
+          OPENAPI_INPUT: ${{ runner.temp }}/chatagents-openapi.json
         run: npm run typecheck
       - name: Build frontend
+        env:
+          OPENAPI_INPUT: ${{ runner.temp }}/chatagents-openapi.json
         run: npm run build
 
   readme-command-consistency:
