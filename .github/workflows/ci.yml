@@ -90,7 +90,7 @@ jobs:
       - name: Sync locked dependencies
         run: uv sync --project backend --locked
       - name: Create database schema
-        run: uv run --project backend python -m alembic upgrade head
+        run: uv run --project backend python -m alembic -c backend/alembic.ini upgrade head
       - name: Fetch base revision
         shell: bash
         env:
@@ -152,7 +152,7 @@ jobs:
       - name: Sync locked dependencies
         run: uv sync --project backend --locked
       - name: Create database schema
-        run: uv run --project backend python -m alembic upgrade head
+        run: uv run --project backend python -m alembic -c backend/alembic.ini upgrade head
       - name: Run the changed-input eval batch
         run: uv run --project backend python scripts/run-eval-ci.py --run both
       - name: Upload eval metadata
