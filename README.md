@@ -1,11 +1,13 @@
-# 🤖 Yuan's  ChatAgents
+# Yuan's ChatAgents
+
 <div align="center">
 
-**一个集成了 Web 搜索、内容提取和深度思考能力的智能体助手**
+**一个把 trace、token、evals 揉进聊天界面本身的 ReAct agent**
 
 ![Python](https://img.shields.io/badge/Python-3.11--3.12-blue.svg)
-![React](https://img.shields.io/badge/React-19+-61DAFB.svg)
+![React](https://img.shields.io/badge/React-19-61DAFB.svg)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.109+-green.svg)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18.4-336791.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
 
 [English](./README_EN.md) | **简体中文**
@@ -14,541 +16,727 @@
 
 ---
 
-## 📖 项目简介
+## 这是什么
 
-这是一个能够联网搜索的智能聊天机器人：
+一个能联网搜索的对话式 agent，但它真正想展示的不是「会搜索」，而是 **LLM 应用工程**：执行过程可观测、压缩决策可解释、指标可复现、模型接入可替换。
 
-1. **智能聊天机器人**（基于 React + LLM）
-2. **Tavily Web 智能体**（基于 AgentRunner + Tavily）
+界面只有一个。运行详情就地长在每条回答下方——不是抽屉、不是侧栏、不是「工程师模式」开关。访客只看到一行 `▸ 2 步 · 1.8k tok · 3.1s`，技术读者点开它能一路看到跨度树、工具结果卡片和本次运行用的提示词版本。这条取舍记在 [ADR-0028](./docs/adr/0028-the-chat-surface-is-the-only-console.md)。
 
-通过 React + FastAPI + AgentRunner + Tavily 架构，为 LLM 提供强大的 Web 搜索、内容提取和深度思考能力。
+> 这个仓库保留了完整 git 历史：它起步时是一个 Streamlit + LangGraph 的 demo，现在是下面描述的样子。「从 demo 演进到工程级」本身就是这份作品集的一部分。
 
-## ✨ 功能特性
+## 三条真实的差异点
 
-### 🎯 核心功能
-- **💬 交互式聊天界面**：基于 React，支持会话、流式回复和模型选择
-- **🔍 实时 Web 搜索**：通过 Tavily 联网搜索最新信息
-- **🕷️ 网站深度爬取**：深度爬取网站嵌套链接
-- **📄 网页内容提取**：提取网页关键内容, 节省Token消耗
-- **🧠 深度思考模式**：支持复杂查询的深度推理
-- **⚡ 快速响应模式**：适合简单问题的快速回答
-- **💭 对话记忆**：基于 FastAPI 与 PostgreSQL 的会话历史管理
+大多数 agent 项目都会说自己「支持多模型、有 trace、跑了 evals」。下面三条是这个项目做了而别处基本没做的，每条都指向仓库里可验证的落点。
 
-### 🛠️ 高级特性
-- **🔑 灵活的 API 密钥管理**：支持 Claude、Tavily 等多个 API
-- **🎨 多模型支持**：支持 Claude (Haiku/Sonnet/Opus)、OpenAI(mini/nano/5.1)，预留 I/Groq 接口
-- **📊 工具调用可视化**：实时展示Serch/Extract/Crawl过程
-- **🎯 智能体类型切换**：快速模式 与 深度思考模式
-- **💾 会话管理**：支持多会话，保留对话历史
-- **🐳 Docker 支持**：一键容器化部署
+### 1. 压缩决策全程可观测
 
-## 🏗️ 架构设计
+上下文膨胀的来源从来不是对话文本，是工具结果正文——一次 `web_reader` 的返回可能是同轮用户消息的几百倍。而这个站点的会话公开共享、任何访客可续聊，**增长没有自然终点**。
 
-![Untitled-2025-12-21-0038](https://img.geekie.site/i/adImg/2025/12/21/022423.png)
+处理办法是**观察掩蔽**（[ADR-0019](./docs/adr/0019-old-observations-are-masked-not-summarized.md)）：重建模型输入序列时，只有最近 N 对工具调用/结果保留完整正文，更早的结果换成结构化指代——工具名、入参、来源标题与 URL，不留正文。掩蔽只作用于投影，**消息表原样不动**；工具调用与结果的配对关系不破，因此不制造悬空调用。
 
-### 技术栈
+不做的是**摘要**。摘要把原文替换成转述，模型据此写出的引用对应不上任何一段真实原文——引用忠实度当场崩掉。
 
-| 层级 | 技术 | 说明 |
-|------|------|------|
-| **前端** | React + Vite | 现代化 TypeScript 单页应用 |
-| **后端** | FastAPI | 高性能异步 API 框架 |
-| **智能体** | AgentRunner | 自建异步智能体运行时 |
-| **LLM** | Claude OpenAI | 主要语言模型 |
-| **工具** | Tavily | Web 搜索/提取/爬取 |
-| **其他** | Docker, python-dotenv | 容器化与配置管理 |
+别家的多层压缩对用户是黑的：看不到当前在哪一层、清了什么、省了多少。这里不是：
 
-## 🚀 快速开始
+| 事实 | 落点 |
+|---|---|
+| 本次运行的保留窗口 | `RunDetail.retention_window` → 运行详情的「本次运行配置」 |
+| 累计丢弃了几轮已完成运行 | `RunDetail.pruned_run_count` → 同上 |
+| 掩蔽了哪几对观察、留下哪些来源 | `conversation/masking.py` 的 `MaskingProjection.attributes` |
+
+> **如实标注缺口**：整轮削减（`pruned_run_count`）已经打通并在界面上呈现；**单条工具观察的掩蔽标记目前还没有数据源**，运行详情里「模型现在只看到标题与 URL」那行标注尚未出现。见 [#77](https://github.com/EllisYuan/ChatAgents/issues/77)。
+
+### 2. 压缩强度做成评测自变量
+
+保留窗口 N 的首版取值**是拍的，不是算的**。既然是拍的，就得有办法校准它——而校准它需要知道「压得更狠，引用忠实度掉多少、成本省多少」。
+
+所以 N 不是一个写死的常量，是一根**扫描轴**：打一个 release tag 会触发 `ci.yml` 的 `release-eval` job，用 `N ∈ {1, 2, 3, 5, 8}` 的网格各跑一遍同一批数据、同一个判官，产出「压缩强度 × 引用忠实度 × 成本」曲线，经 `GET /api/evals/summary` 落到站点的 `/evals` 页。
+
+公开可复现的这条曲线，业界目前没有第二家给出过。
+
+### 3. token 估算器自校准
+
+全项目只有**一个** token 口径：上游响应报告的输入 token 数（[ADR-0020](./docs/adr/0020-there-is-one-token-yardstick.md)）。
+
+这条措辞是有后果的。它意味着本地估算器的职责**不是「数 token」，是「预测上游会数出多少」**——正确性判据因此是「与上游报告的用量接近」，不是「符合某个 tokenizer 规范」。
+
+为什么不用精确的本地 tokenizer？因为不存在这样的东西：Anthropic 不公开 tokenizer；官方计数端点自己的文档里写着 "The token count is an **estimate**"；同一段文本在相邻两代模型上计数能差三成；而计数端点三个协议里只有一个有。
+
+真值好在它不是近似——它就是账单本身。估算器只承担真值覆盖不到的那部分（本轮新增的增量），**误差被压在增量上，不落在全量上**。
+
+而估算器会自己校准：观测侧每次调用都有实测输入 token 数，按模型分组算「实测 ÷ 估算」就得到该模型的偏差系数——`token_estimation.py` 的 `compute_calibration_factors()`。**校准数据来自这个项目自己的 trace**，零额外网络调用、零 tokenizer 依赖。
+
+一把尺，两处用：`web_reader` 的分节阈值（纯校准后估算，那段文本还没进过任何模型）与保留窗口预算（上一轮真值 + 本轮增量估算）。两处读的是同一把尺，因此可以互相推理。
+
+---
+
+## 架构
+
+### 五个能力模块与它们的依赖方向
+
+后端按**能力**切，不按技术层切（[ADR-0007](./docs/adr/0007-backend-is-split-by-capability-not-by-layer.md)）。判据是可测试性：`api/ + services/ + repositories/` 那种切法会让「业务模块不得依赖观测模块」这条纪律在目录上完全看不见，只能靠 code review 盯；按能力切之后它退化成一条 import 规则。
+
+下图画的是**代码里实际存在的直接 import 边**：
+
+```mermaid
+graph TD
+    main["main.py<br/>FastAPI 装配 · 三重包装组装处"]
+
+    subgraph caps["五个能力模块"]
+        conv["conversation/<br/>会话 · 消息 · 输入序列重建 · 观察掩蔽"]
+        agent["agent/<br/>ReAct Loop · 工具执行器 · 提示词与工具集版本"]
+        obs["observability/<br/>跨度写入 · trace 查询 · 用量聚合"]
+        llm["llm/<br/>端点档案 · ModelPort · 三协议适配器 · 模型发现 · 回放"]
+        tools["tools/<br/>web_search · web_reader"]
+    end
+
+    subgraph edge["边界与共享叶子"]
+        transport["transport/<br/>AG-UI over SSE 编码"]
+        evals["eval_summary/<br/>站点评测展示面"]
+        db["db/ · database.py<br/>ORM · app 与 obs 两个 schema"]
+        leaf["token_estimation.py · validation.py<br/>error_codes.py · exceptions.py · model_catalog.py"]
+    end
+
+    main --> conv
+    main --> agent
+    main --> obs
+    main --> llm
+    main --> transport
+    main --> evals
+    main --> db
+
+    conv --> agent
+    conv --> llm
+    conv --> db
+    agent --> llm
+    agent --> tools
+    agent --> db
+    obs --> agent
+    obs --> llm
+    obs --> db
+    transport --> agent
+    transport --> llm
+    evals --> llm
+    db --> llm
+
+    llm --> leaf
+    tools --> leaf
+    conv --> leaf
+    agent --> leaf
+    transport --> leaf
+```
+
+三条值得单独指出来的性质：
+
+- **`llm/` 不认识 agent / conversation / observability。** 因此三协议契约测试完全独立可跑：不需要数据库，不需要 FastAPI。
+- **依赖方向单向，`observability/ → agent/`，反过来没有。** 观测可丢、业务不可丢；一旦业务反向依赖观测，「观测写失败不影响业务」这条纪律就作废了。
+- **模块名是 `llm/` 而不是 `models/`。** `models` 在 Python web 生态里约定俗成指 ORM，占用它会让每个新读者误解一次。ORM 因此保住 `<模块>/models.py` 这个通行位置。
+
+模块内四层：`router.py`（HTTP ↔ 领域类型，不含业务）→ `service.py`（规则、编排、事务边界）→ `repository.py`（查询，不含规则、不开事务）→ `models.py`（ORM）。
+
+> 📌 `docs/adr/0007` 里那段依赖方向的文字与当前实现有出入（它写 `agent/ ─→ conversation`，实际方向相反）。上图以代码为准，偏差已单独记录，不在文档变更里顺手改代码或改决策。
+
+### 三重包装
+
+一次运行的事件流从内到外穿过三层，每层职责单一、失败语义各不相同。这段形状逐字取自 `backend/src/chat_agents/main.py`：
+
+```
+encode_sse(              # transport/       领域事件 → AG-UI 线格式
+  observe(               # observability/   落跨度，独立事务，失败只记日志
+    persist(             # conversation/    落消息，业务事务，失败要报错
+      runner.run(messages, ...))))
+         ▲
+         └── agent/  纯 ReAct Loop：不碰数据库、不碰 HTTP、不知道 SSE 存在
+```
+
+| 层 | 干什么 | 写失败了怎么办 |
+|---|---|---|
+| `runner.run` | 跑 ReAct 迭代，吐**领域事件**（不带任何线格式） | 事件化成 `RunFailed` |
+| `persist` | 每次模型调用完成即写一条消息，不攒到最后 | **向上抛**——用户的话丢了必须报错 |
+| `observe` | 闭合即写跨度，每次写入自己开短事务 | **只记日志**——少一条观测不该拖垮业务 |
+| `encode_sse` | 翻成 AG-UI 事件 | 收敛成一条 `RUN_ERROR` 结束流 |
+
+两个不显然但重要的点：
+
+**「观测写失败不影响业务」是结构性成立的，不靠人记住。** 业务写入与观测写入各自 `async with session_factory()`，物理上不可能同事务提交。
+
+**流开始后的失败一律走 `RUN_ERROR` 事件，HTTP 状态码改不了。** 一旦第一个字节发出去，HTTP 已经是 200。`encode_sse` 是这条纪律唯一的执行位置——它包一层 `try/except`，任何从内三层冒出来的异常都在这里收敛，不再向上抛。流**开始前**的失败（档案校验、会话不存在、空消息）才走正常 HTTP 状态码，用 RFC 9457 的 `application/problem+json`。同一个失败在两条路径上取**同一个错误码**（`error_codes.py` 是唯一的码表）。
+
+### 一次运行发生了什么
+
+```mermaid
+sequenceDiagram
+    participant U as 浏览器
+    participant API as main.py
+    participant C as conversation/
+    participant R as agent/ AgentRunner
+    participant M as llm/ ModelPort
+    participant T as agent/ ToolExecutor
+    participant O as observability/
+
+    U->>API: POST /api/runs
+    API->>C: 落用户消息（业务事务）
+    C-->>API: 重建模型输入序列（观察掩蔽在此发生）
+    API->>R: run(messages, profile, effort)
+
+    loop 每次迭代（受努力档位的硬上限约束）
+        R->>M: stream(messages, tools, system_prompt)
+        M-->>R: TextDelta / ReasoningDelta / ToolCall
+        R-->>U: SSE：STEP_STARTED · TEXT_MESSAGE · REASONING
+        opt 模型发起了工具调用
+            R->>T: 执行（超时 · 重试 · 错误分类全在这一处）
+            T-->>R: ToolStarted / ToolFinished
+            R-->>U: SSE：TOOL_CALL · chatagents.tool_result
+        end
+        R-->>O: 落跨度与用量（独立事务）
+        R-->>U: SSE：chatagents.usage · chatagents.span
+    end
+
+    R-->>U: SSE：RUN_FINISHED（或 RUN_ERROR）
+```
+
+**工具执行器是调用工具的唯一入口。** 超时、重试、错误分类、跨度记录、结果渲染全部集中在那一处，工具本身只是一个干净的异步函数。新加的工具挂进 `tools/registry.py` 就自动获得这一整套横切能力——**结构上不可能漏掉**。
+
+工具失败分两类，这个区分是硬的：**外部失败**（超时、限流、目标不可达、供应商报错）不抛异常，作为工具结果交回模型，由模型决定下一步；**程序错误**（参数校验不过、代码 bug、密钥没配）中止运行并上报，绝不伪装成工具结果喂给模型。
+
+### 两个 schema
+
+业务数据与观测数据同一个 PostgreSQL 实例、两个 schema（[ADR-0002](./docs/adr/0002-business-and-observability-share-a-database.md)）。物理同库保住跨表 join——trace 是这个项目的核心展示物，前端要在聊天界面里直接点开某条消息看它的执行细节；逻辑分 schema 让边界在代码里可见。
+
+```mermaid
+erDiagram
+    SESSION ||--o{ MESSAGE : "app 内"
+    SESSION ||--o{ RUN : "obs 指向 app"
+    MESSAGE ||--o{ RUN : "trigger_message_id"
+    PROMPT_VERSIONS ||--o{ RUN : "obs 指向 app"
+    TOOL_SCHEMA_VERSIONS ||--o{ RUN : "obs 指向 app"
+    RUN ||--o{ SPAN : "obs 内"
+    SPAN ||--o{ SPAN : "parent_span_id"
+
+    SESSION {
+        uuid id PK "前端生成 UUIDv7"
+        text title "可空：由辅助模型生成"
+        timestamp deleted_at "软删除标记"
+    }
+    MESSAGE {
+        uuid id PK
+        int seq "会话内单调递增"
+        text role
+        jsonb content "完整的模型视角序列"
+    }
+    PROMPT_VERSIONS {
+        text version_id PK "内容哈希，非人手递增"
+    }
+    TOOL_SCHEMA_VERSIONS {
+        text version_id PK "粒度是工具集，不是单个工具"
+    }
+    RUN {
+        uuid id PK
+        uuid trigger_message_id FK "消息区间的下界"
+        int last_message_seq "消息区间的上界"
+        jsonb attributes "保留窗口 · 削减计数"
+    }
+    SPAN {
+        uuid id PK
+        text kind "llm 或 tool"
+        text usage_status "complete / partial / unavailable"
+        int input_tokens "真值：上游报告的口径"
+    }
+```
+
+**外键只能 `obs` → `app`，单向。** 这条约束有个不显然的后果：**消息表上不能有 `run_id`**。「这条消息属于哪次运行」只能从观测侧圈定——靠 `trigger_message_id` 加 `last_message_seq` 反查（一次运行产出的消息在会话里必然连续）。
+
+三条相关的建模纪律：
+
+- **没有成本字段。** 成本是可推算量（随价格配置变化），不是观测事实，与 token 数分开存放。
+- **缺失的用量不以 0 表示。** 用量三态 `complete` / `partial` / `unavailable`，三者之外没有第四种状态。
+- **会话删除是软删除。** 站点无鉴权、会话列表公开共享，硬删除要么级联把 trace 一起销毁（核心展示物被路人一键抹掉），要么留下一堆孤儿跨度。
+
+### 模型接入：三协议并列，互不翻译
+
+`llm/` 对项目其余部分零业务依赖，`ModelPort` 是它对外的唯一出入口：
+
+```
+                   ┌─ openai_responses         ─┐
+ModelPort.stream ──┼─ openai_chat_completions  ─┼──→ 统一的 ModelEvent 流
+                   └─ anthropic_messages       ─┘
+```
+
+几条设计取舍：
+
+- **协议是端点档案的属性，不是模型的属性。** `ModelPort` 签名上不接受「厂商」参数，没有从模型标识推断协议的余地。同一个 base URL 可以配多份档案，各自声明不同协议。
+- **模型清单运行时发现，前后端都不硬编码**（[ADR-0016](./docs/adr/0016-the-model-list-is-discovered-and-persisted.md)）。清单**不保证可用**——里面的标识仍可能因欠费、凭证冷却、上游下线而调不通。发现失败是提示性的，不是中断性的：服务照常跑，界面改为让用户手填。
+- **上游错误原文透传，不分类。** 不建立错误码映射表，上游说什么就是什么——那不是这个项目的话。
+- **回放发生在 `ModelPort` 边界，不在 HTTP 传输层**（[ADR-0025](./docs/adr/0025-replay-happens-at-the-model-port-not-the-http-transport.md)）。录下来的是适配器已经产出的 `ModelEvent`，不含 HTTP 帧、chunk 时序或鉴权信息——因此回放层对「上游 SDK 换了哪个 HTTP 客户端库」完全免疫。这不是理论上的洁癖：`openai` 3.x 已经切到 `httpx2`，而 `anthropic` 仍在 `httpx`，一个进程里两个库并存是预期状态。
+
+### 工具：能力与实现分开
+
+只有两个工具，且**锁死**：
+
+| 工具 | 干什么 | 当前供应商 |
+|---|---|---|
+| `web_search` | 搜索相关网页 | Tavily |
+| `web_reader` | 读取网页与 PDF 正文 | Jina Reader |
+
+**工具的身份是「名字 + 描述 + 入参 schema」三件事，属于契约；身份不随背后由谁实际执行而改变**（[ADR-0004](./docs/adr/0004-tools-are-capabilities-providers-are-implementations.md)）。换掉 Tavily 不改变 `web_search` 是什么。每个工具内部切成三层：契约（`contract.py`）、端口（`port.py`，唯一碰网络的地方）、编排（`orchestration.py`，纯函数）。
+
+长文档不整篇塞进上下文：`web_reader` 先返回文档结构（标题与章节清单），由模型按需索取具体章节（**渐进披露**，[ADR-0005](./docs/adr/0005-long-documents-use-progressive-disclosure.md)）。只做一级，不做多级路由，不做 RAG。
+
+### 执行控制：努力档位
+
+用户为每次运行选一个档位，它同时决定**硬上限**（执行层强制的天花板，模型越不过）与**软预算**（写进系统提示词、告知模型的额度）。软预算低于硬上限，留出余量，使越限成为异常而非常态。
+
+| 档位 | 软预算 | 硬上限 |
+|---|---|---|
+| `low` | 3 | 4 |
+| `medium` | 6 | 8 |
+| `high` | 10 | 13 |
+| `xhigh` | 16 | 20 |
+
+保留窗口**与努力档位正交**，不随档位变化——N 的最优值由引用忠实度决定，档位由任务复杂度决定，两者不是同一个自变量；耦合之后评测也没法单独扫这一维。
+
+---
+
+## 快速开始
 
 ### 环境要求
 
-- **Python**: 3.11–3.12
-- **API 密钥**:
-  - [Anthropic Claude API](https://console.anthropic.com/)
-  - [Tavily API](https://tavily.com/)
+- **Python** 3.11–3.12，装 [uv](https://docs.astral.sh/uv/)
+- **Node** 22（前端）
+- **Docker** 与 docker compose 插件（跑本地 PostgreSQL）
+- **API 密钥**：[Anthropic](https://console.anthropic.com/) 或 [OpenAI](https://platform.openai.com/)（至少一个）、[Tavily](https://tavily.com/)；Jina Reader 可选（不填也能用，只是配额低）
 
-### 安装步骤
-
-#### 1. 克隆仓库
+### 1. 装依赖
 
 ```bash
-git clone <your-repo-url>
-cd intelligent-chatbot
-```
-
-#### 2. 安装依赖
-
-安装 [uv](https://docs.astral.sh/uv/) 后，在仓库根目录执行：
-
-```bash
+git clone https://github.com/EllisYuan/ChatAgents.git
+cd ChatAgents
 uv sync --project backend
+npm --prefix frontend ci
 ```
 
-首次运行测试前，启动本地 PostgreSQL：
+### 2. 起数据库
+
+**首次跑测试之前必须先起本地 PostgreSQL**——集成测试打真库，没有内存库替身：
 
 ```bash
 docker compose up -d postgresql
 ```
 
-本地数据库默认配置如下，均可通过同名环境变量覆盖：
+> ⚠️ compose service 的名字是 **`postgresql`**，不是 `postgres`。
 
-| 项目 | 默认值 |
+本地默认值（都可以用同名环境变量覆盖）：
+
+| 项 | 默认值 |
 |---|---|
 | Compose service | `postgresql` |
-| Container | `chatagent-postgresql` |
-| Database | `chat_agents` |
-| User | `root` |
-| Password | `Agent@Dev_1` |
-| Host | `127.0.0.1:5432` |
-| Volume | `chatagent_postgres-data` |
+| 容器名 | `chatagent-postgresql` |
+| 数据库 | `chat_agents` |
+| 用户 | `root` |
+| 密码 | `Agent@Dev_1` |
+| 监听 | `127.0.0.1:5432` |
+| 数据卷 | `chatagent_postgres-data` |
 
-密码写入连接 URL 时，`@` 必须编码为 `%40`：
+密码写进连接 URL 时，`@` 必须编码成 `%40`：
 
 ```text
 postgresql+psycopg://root:Agent%40Dev_1@127.0.0.1:5432/chat_agents
 ```
 
-Compose 启动 backend 时会先运行 `migrate` service；单独初始化数据库可执行：
+compose 起 backend 时会先跑 `migrate` service；单独初始化数据库：
 
 ```bash
 docker compose run --rm migrate
 ```
 
-#### 3. 配置环境变量
+### 3. 配环境变量
 
 ```bash
-# 复制示例配置文件
 cp .env.sample .env
-
-# 编辑 .env 文件，填入你的 API 密钥
-# ANTHROPIC_API_KEY=sk-ant-api-your-key-here
-# TAVILY_API_KEY=tvly-your-key-here
 ```
 
-#### 4. 启动应用
-
-**方法 A：分别启动（推荐开发）**
+### 4. 起服务
 
 ```bash
-# 终端 1：启动后端
+# 终端 1：后端
 uv run --project backend python -m uvicorn chat_agents.main:app --app-dir backend/src --reload
 
-# 终端 2：启动 React 前端
+# 终端 2：前端
 npm --prefix frontend run dev
 ```
 
-**方法 B：使用 Docker Compose 启动数据库和后端**
+| 入口 | 地址 |
+|---|---|
+| 前端 | http://localhost:5173 |
+| 后端（本地直起） | http://localhost:8080 |
+| 后端（容器映射） | http://127.0.0.1:19180 |
+| OpenAPI 文档 | `<后端地址>/docs` |
+
+用 compose 起数据库和后端（前端仍在宿主上跑 dev server）：
 
 ```bash
 docker compose up -d --build
-
-# 另一个终端启动 React 前端
-npm --prefix frontend run dev
+VITE_BACKEND_ORIGIN=http://127.0.0.1:19180 npm --prefix frontend run dev
 ```
 
-#### 5. 访问应用
+## 配置
 
-- **前端**: http://localhost:5173
-- **Docker 后端 API**: http://localhost:19180
-- **Docker API 文档**: http://localhost:19180/docs
-- **本地直接启动后端时**: http://localhost:8080
+### 环境变量
 
-### 🚢 生产环境部署（宿主 nginx + Docker 后端）
+| 变量 | 说明 | 必需 |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | Anthropic 密钥，对应 `anthropic-official` 档案 | 至少配一个 |
+| `OPENAI_API_KEY` | OpenAI 密钥，对应 `openai-official` 档案 | 至少配一个 |
+| `TAVILY_API_KEY` | `web_search` 用 | ✅ |
+| `JINA_API_KEY` | `web_reader` 用；不填也能跑，只是配额低 | ❌ |
+| `DATABASE_URL` | 完整连接串；compose 会用 `POSTGRES_*` 拼出来 | ❌ |
+| `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | compose 用 | ❌ |
+| `POSTGRES_PASSWORD_URLENCODED` | 同上，但 `@` 要写成 `%40` | ❌ |
+| `CHATAGENTS_ENDPOINTS_CONFIG_PATH` | 端点档案 YAML 的位置 | ❌ |
+| `CHATAGENTS_EVAL_REPORTS_DIR` | 评测产出目录，默认 `.eval-reports/` | ❌ |
+| `APP_VERSION` | 构建时注入的 git tag；本地为 `dev` | ❌ |
+| `VITE_BACKEND_ORIGIN` | 前端 dev server 代理到哪个后端 | ❌ |
 
-**链路**：`浏览器 → 宿主 nginx（宝塔，TLS）┬ / → 直接读磁盘（前端静态产物）`
-`                                       └ /api/ → 127.0.0.1:19180 → backend 容器`
+### 端点档案
 
-前端不进容器：静态产物由宿主 nginx 直接读磁盘伺服，`/api/` 只穿这一层 nginx 直连后端。原因见下方「SSE 只能穿一层 nginx」。
+档案定义在 `backend/config/endpoints.yaml`，**只存密钥的环境变量名，不存密钥本身**。这份文件是应用配置，随仓库走、烘进镜像（[ADR-0032](./docs/adr/0032-app-config-lives-in-the-repo-machine-config-does-not.md)）：
 
-#### 一次性服务器准备（人做，CD 做不了）
+```yaml
+default_profile: anthropic-official
 
-1. 建站 `agent.ellisyuan.com` + 申请证书（宝塔面板操作）
-2. `git clone` 仓库到 `/www/chatagents/repo`
-3. 在 clone 目录**之外**写 `/www/chatagents/.env`（含 `POSTGRES_*`、`ANTHROPIC_API_KEY` 等），`chmod 600`——CD 只读它，绝不写它
+endpoints:
+  - name: anthropic-official
+    protocol: anthropic_messages
+    base_url: https://api.anthropic.com
+    auth_field: x-api-key
+    auth_secret_ref: ANTHROPIC_API_KEY
+    main_model: claude-sonnet-4-5-20250929
+```
+
+`base_url` 可以指向任意中转站——「支持自定义 base URL」是硬需求，不是附赠功能。`auth_field` 可配，因为不同中转站期待的 header 名不一样。
+
+### 版本号
+
+**版本号只由 git tag 决定**，`backend/pyproject.toml` 里的 `version` 永久钉死 `0.0.0`（[ADR-0030](./docs/adr/0030-the-git-tag-is-the-only-version.md)）。构建时 `ARG APP_VERSION` 把 tag 打进镜像，后端经 `/health` 暴露，前端经 Vite 的 `define` 进 `import.meta.env`。
+
+> 看到 `pyproject.toml` 写着 `0.0.0` 而线上 `/health` 返回 `v1.4.2` 时，第一反应通常是「这里漏改了」。**`0.0.0` 是故意的**——`uv_build` 不支持 VCS 驱动的包版本，让它保持一个显然无意义的值，好过让它保持一个看起来有意义、实际会撒谎的值。
+
+---
+
+## 部署
+
+### 链路
+
+```
+                    ┌───────────────────────────────────────────────┐
+                    │  宿主 nginx（宝塔面板管 TLS 与证书续期）      │
+浏览器 ── HTTPS ──▶ │                                               │
+                    │  location /      root .../frontend/current    │──▶ 直接读磁盘
+                    │                  try_files → index.html       │    （前端不进容器）
+                    │                                               │
+                    │  location /api/  proxy_pass 127.0.0.1:19180   │──┐
+                    │                  proxy_buffering off          │  │
+                    └───────────────────────────────────────────────┘  │
+                                                                       ▼
+                                          ┌──────────────────────────────────┐
+                                          │  backend 容器（ghcr.io 镜像）    │
+                                          │  uvicorn :8080                   │
+                                          └──────────────┬───────────────────┘
+                                                         │ backend-network
+                                          ┌──────────────▼───────────────────┐
+                                          │  postgresql 容器（postgres:18.4）│
+                                          │  app schema + obs schema         │
+                                          └──────────────────────────────────┘
+```
+
+### ⚠️ 在宝塔面板里改 nginx 会被下一次部署覆盖
+
+`deploy/nginx/site.conf` 随 `git checkout <tag>` 换版，面板里的手改内容**不会被保留**——下一次部署的 `git checkout` 会把它还原。
+
+判据是「这是机器的属性还是应用的属性」（[ADR-0032](./docs/adr/0032-app-config-lives-in-the-repo-machine-config-does-not.md)）：
+
+| 归宝塔面板 | 归仓库 `deploy/nginx/site.conf` |
+|---|---|
+| TLS 参数、证书路径、证书续期、监听端口 | `location` 路由、`proxy_buffering off`、超时、静态资源的 `root` 与 `try_files` |
+
+**换一台服务器还成立的，是应用的属性——改仓库里那份，再发布。**
+
+### SSE 只能穿一层 nginx（结构性要求）
+
+`X-Accel-Buffering` 属于 `X-Accel-*` 一族，**只在离用户最近的那一层生效——被第一层吃掉就不会向下传**。如果 `/api/` 串了两层 nginx（比如又经过一层容器内的），就必然有一层照常缓冲。
+
+**而且失效是静默的**：流式响应不报错，只是攒一坨再吐。本地单层环境永远复现不出来。
+
+解法不是「两层都配 `proxy_buffering off`」，而是让 `/api/` **只穿一层**——宿主 nginx 直连后端，静态资源走另一条 `location`。**这是前端不进容器的理由之一。**
+
+### 一次性服务器准备（人做，CD 做不了）
+
+1. 建站 `agent.ellisyuan.com`、申请证书（宝塔面板）
+2. `git clone` 到 `/www/chatagents/repo`
+3. 在 clone 目录**之外**写 `/www/chatagents/.env`，`chmod 600`——CD 只读它，**绝不写它**
 4. 宝塔站点配置里加一行：
    ```nginx
    include /www/chatagents/repo/deploy/nginx/site.conf;
    ```
-5. 配置 GitHub Actions 的 SSH 部署密钥与服务器 IP 白名单
+5. 配 GitHub Actions 的 SSH 部署密钥与服务器 IP 白名单
 
-> **⚠️ 在宝塔面板里直接改 Nginx 配置会被下一次部署覆盖。** `deploy/nginx/site.conf` 随 `git checkout <tag>` 换版，面板里的手改内容不会被保留。要改路由、超时、`try_files` 这类应用属性的配置，改仓库里的 `deploy/nginx/site.conf` 再发布；只有 TLS、证书路径、监听端口这类机器属性才在面板里改。详见 [ADR-0032](./docs/adr/0032-app-config-lives-in-the-repo-machine-config-does-not.md)。
+### 发布与回滚
 
-#### 发布 / 回滚
+打一个 `v*` tag 触发 `release.yml`：构建后端镜像推 ghcr.io → 构建前端产物 → 发 GitHub Release → SSH 到服务器跑 `deploy.sh`。
+
+**回滚就是换一个旧 tag 重跑同一个脚本**：
 
 ```bash
 ./scripts/deploy.sh v1.4.2
 ```
 
-换一个 tag 重跑就是回滚，不依赖 CI 是否可用。脚本会拉取 `ghcr.io` 镜像、跑 `compose.yaml` + `compose.prod.yaml`、从 GitHub Release 下载前端产物解到 `/www/chatagents/frontend/<tag>` 并把 `current` 软链接指过去。前置条件见脚本头部注释。
+不依赖 CI 是否可用。一个 tag 出厂的东西——后端镜像、前端静态产物、compose 与 nginx 配置——**同进同退**，不做兼容矩阵：不存在「后端 v1.4 配前端 v1.3」这种组合。
 
-#### SSE 只能穿一层 nginx（结构性要求）
+### 部署后必做：`curl -N` 实测
 
-`X-Accel-Buffering` 属于 `X-Accel-*` 一族，只在离用户最近的那一层生效——被第一层吃掉就不会向下传。如果 `/api/` 串两层 nginx（例如又经过容器内一层），就会有一层照常缓冲，**且失效是静默的**：流式响应不报错，只是攒一坨再吐，本地单层环境永远复现不出来。解法不是两层都配 `proxy_buffering off`，而是让 `/api/` 只穿一层——这也是前端不进容器的原因之一。
-
-#### 部署后必做：curl -N 实测
-
-这是「SSE 被静默攒批」唯一的检出手段，且不归 CI（CI 环境没有真实 nginx）：
+这是「SSE 被静默攒批」**唯一的检出手段**，且不归 CI（CI 环境里没有真实 nginx）：
 
 ```bash
 curl -N https://agent.ellisyuan.com/api/runs -X POST \
-  -H "Content-Type: application/json" -d '{"session_id":"...", "message":"你好"}'
+  -H "Content-Type: application/json" \
+  -d '{"session_id":"...", "message":"你好"}'
 # 应逐条打印事件，而不是卡住不动然后一次性吐出一大坨
 ```
 
-同时验证：
+同时验证另外两件事：
 
 ```bash
 curl https://agent.ellisyuan.com/health
-# 应返回 {"status":"ok","version":"v1.4.2"}（版本号来自当次部署的 git tag）
+# {"status":"ok","version":"v1.4.2"}——版本号来自当次部署的 git tag
 
 curl -I https://agent.ellisyuan.com/s/00000000-0000-0000-0000-000000000000
-# 刷新前端路由不应 404——依赖 deploy/nginx/site.conf 里的 try_files
+# 刷新前端路由不该 404——依赖 site.conf 里的 try_files
 ```
 
-## 📖 使用指南
+---
 
-### 基本使用
+## 测试与门禁
 
-1. **配置 API 密钥**
-   - 在 `.env` 文件中配置 Claude、OpenAI 和 Tavily API 密钥
-   - 前端通过后端 API 使用这些配置，不在浏览器中保存密钥
-
-2. **开始对话**
-   - 在 React 前端创建或选择会话
-   - 输入问题并发送，实时接收流式回复
-   - 通过模型选择和高级选项调整请求
-
-3. **查看执行过程**
-   - 在 trace 面板中查看模型调用、工具调用和耗时
-   - Tavily 工具支持搜索、网页内容提取和深度爬取
-   - 会话列表保留历史会话，便于继续工作
-
-### 高级功能
-
-#### 工具调用展示
-
-智能体会根据问题自动选择合适的工具：
-
-- **🔍 web_search**: 搜索相关网页
-- **📄 web_reader**: 读取网页和 PDF 内容
-
-每个工具调用都会在 UI 中实时展示：
-- 工具名称和类型
-- 输入参数
-- 输出摘要和来源链接
-
-#### 会话管理
-
-- 每个会话有唯一 ID
-- 支持对话历史记忆
-- 点击"新建会话"开始新对话
-
-## 🔧 配置说明
-
-### 环境变量
-
-| 变量名 | 说明 | 必需 | 默认值 |
-|--------|------|------|--------|
-| `ANTHROPIC_API_KEY` | Claude API 密钥 | ✅ | - |
-| `TAVILY_API_KEY` | Tavily API 密钥 | ✅ | - |
-| `OPENAI_API_KEY` | OpenAI API 密钥 | ✅ | - |
-| `GROQ_API_KEY` | Groq API 密钥（未来） | ❌ | - |
-| `PORT` | 后端端口 | ✅ | 8080 |
-
-### 智能体配置
-
-后端配置集中在 `backend/config/endpoints.yaml` 和环境变量中；模型清单与高级选项由后端 API 提供，React 前端据此渲染选择控件。开发时可通过 `VITE_BACKEND_ORIGIN` 覆盖前端代理的后端地址。
-
-## 📁 项目结构
-
-```
-intelligent-chatbot/
-├── backend/
-│   ├── src/chat_agents/        # FastAPI、AgentRunner 与领域模块
-│   ├── tests/                  # 后端测试
-│   ├── config/endpoints.yaml   # endpoint 配置
-│   ├── pyproject.toml          # Python 项目元数据
-│   └── uv.lock                 # 锁定依赖
-├── frontend/                   # React + Vite 单页应用
-│   ├── src/                    # 页面、组件与 API 客户端
-│   └── public/                 # 静态资源
-├── docs/                       # 文档与 ADR
-├── deploy/                     # Nginx 与发布配置
-├── compose.yaml                # 本地 Docker Compose 配置
-├── .env                       # 环境变量（本地）
-├── .env.sample                # 环境变量示例
-├── .gitignore                 # Git 忽略文件
-├── scripts/                   # 开发与发布脚本
-├── README.md                 # 项目文档（中文）
-└── README_EN.md              # 项目文档（英文）
-```
-
-## 🎯 功能演示
-
-### 示例对话 1：简单问答（快速模式）
-
-**用户**: 什么是人工智能？
-
-**智能体**:
-- 无需工具调用
-- 直接基于基础知识回答
-- 响应时间 < 3 秒
-
-### 示例对话 2：实时搜索（快速模式）
-
-**用户**: 当前最新的 AI 技术趋势是什么？
-
-**智能体**:
-1. 🔍 调用 `web_search`（topic=news, time_range=month）
-2. 📊 展示搜索结果
-3. 💬 生成带引用的答案
-
-### 示例对话 3：深度研究（深度思考模式）
-
-**用户**: 分析一下不同 Agent framework 的区别，并给出使用建议
-
-**智能体**:
-1. 🔍 搜索相关官方文档
-2. 📄 提取关键页面内容
-3. 🔍 交叉搜索更多资料
-4. 📄 提取对比信息
-5. 🧠 深度分析并生成详细报告
-
-## 🐛 常见问题与故障排查
-
-### 部署问题
-
-#### 1. 刷新 `/s/<uuid>` 返回 404
-
-**原因**：`deploy/nginx/site.conf` 里的 `try_files` 没生效——要么宝塔站点配置漏了 `include` 那一行，要么 `root` 指向的目录不是当前发布版本。
-
-**排查**：
-```bash
-# 确认 include 生效
-nginx -T | grep -A3 "location /"
-
-# 确认软链接指向本次发布的 tag
-readlink -f /www/chatagents/frontend/current
-```
-
-#### 2. `/api/` 返回 404 或路径被截断
-
-**原因**：`proxy_pass` 末尾多了一条斜杠，把 `/api/` 前缀截断了。
-
-**错误配置**：
-```nginx
-location /api/ {
-    proxy_pass http://127.0.0.1:19180/;  # ❌ 末尾的斜杠导致路径被截断
-}
-```
-
-**正确配置**（`deploy/nginx/site.conf` 里已是这样）：
-```nginx
-location /api/ {
-    proxy_pass http://127.0.0.1:19180;  # ✓ 末尾无斜杠，保留完整路径
-}
-```
-
-**验证**：
-```bash
-curl http://127.0.0.1:19180/api/sessions   # 后端直连
-curl https://agent.ellisyuan.com/api/sessions  # 经 nginx 代理，应返回相同结果
-```
-
-会话列表使用 `(before_updated_at, before_id)` 复合游标：第一页省略两项；后续页必须同时传入两项。query 参数没有 JSON `null` 表达，客户端应省略空值，不能发送 `before_id=null` 或 `before_updated_at=null`。
-
-#### 3. 流式回复攒一坨才吐出来（SSE 被静默缓冲）
-
-**原因**：`/api/` 串了不止一层 nginx，或某一层缺了 `proxy_buffering off`。`X-Accel-Buffering` 只在离用户最近的那一层生效，失效不报错——见上文「SSE 只能穿一层 nginx」。
-
-**解决方案**：确认 `/api/` 只经过宿主这一层 nginx（不要再套一层容器内 nginx），且 `deploy/nginx/site.conf` 里的 `proxy_buffering off` 没被面板手改覆盖掉。用 `curl -N` 实测确认逐条到达。
-
-### 本地开发问题
-
-#### 4. 后端服务无法启动
-
-**问题**: `ConnectionRefusedError` 或端口被占用
-
-**解决方案**:
-```bash
-# 检查端口占用
-netstat -ano | findstr :8080  # Windows
-lsof -i :8080                 # macOS/Linux
-
-# 杀死占用进程（Linux/macOS）
-kill -9 $(lsof -t -i:8080)
-
-# 或修改端口（.env 文件）
-PORT=8081
-```
-
-#### 5. API 密钥错误
-
-**问题**: `401 Unauthorized` 或 "API 密钥验证失败"
-
-**解决方案**:
-- 检查 API 密钥格式：
-  - Claude: `sk-ant-api-...`
-  - Tavily: `tvly-...`
-  - OpenAI: `sk-proj-...`
-- 确认密钥未过期且有足够配额
-- 检查 `.env` 文件是否正确加载
-- Docker 用户：确认 `compose.yaml` 中的环境变量映射
-
-```bash
-# 测试环境变量加载
-python -c "from dotenv import load_dotenv; import os; load_dotenv(); print(os.getenv('ANTHROPIC_API_KEY'))"
-```
-
-### 运行时问题
-
-#### 6. 工具调用失败或超时
-
-**问题**: Tavily 搜索/提取工具返回错误
-
-**解决方案**:
-- 检查网络连接（特别是防火墙/代理）
-- 确认 Tavily API 配额充足
-- 检查后端日志：`docker compose logs backend -f`
-- 降低并发请求数量或增加超时时间
-
-#### 7. 流式响应中断
-
-**问题**: AI 回复中途停止或不完整
-
-**解决方案**:
-- 检查 LLM API 配额和速率限制
-- 增加 Nginx 超时设置（如使用反向代理）
-- 检查后端日志查看错误堆栈
-- 尝试切换模型（如从 Opus 降级到 Sonnet）
-
-### 数据问题
-
-#### 8. 会话历史丢失
-
-**问题**：重启容器后对话记录消失
-
-**原因**：PostgreSQL 使用的 named volume 被删除，或迁移服务未成功执行。
-
-**解决方案**：
-
-`compose.yaml` 已通过 `postgres-data` 持久化 PostgreSQL 数据。正常重启不要使用 `docker compose down -v`：
-
-```bash
-docker compose down
-docker compose up -d --build
-```
-
-备份数据库：
-
-```bash
-docker compose exec postgresql pg_dump -U root -d chat_agents > chat_agents.sql
-```
-
-恢复数据库前先确认服务已停止，再按 PostgreSQL 工具的恢复流程导入 `chat_agents.sql`。
-
-仅在确认可以删除全部本地数据时，才重建数据库 volume：
-
-```bash
-docker compose down --volumes --remove-orphans
-docker compose up -d postgresql
-docker compose run --rm migrate
-```
-
-`docker compose down --volumes` 会永久删除 `chatagent_postgres-data` 中的会话与观测数据。全新 volume 会按照 `POSTGRES_USER=root` 初始化，`root` 自动具备 migration 和集成测试所需的 `SUPERUSER`、`CREATEDB` 权限。
-
-验证 migration revision：
-
-```bash
-docker compose exec postgresql psql -U root -d chat_agents -c "SELECT version_num FROM public.alembic_version;"
-```
-
-### 性能问题
-
-#### 9. 响应速度慢
-
-**优化建议**：
-1. 使用更快的模型（Haiku > Sonnet > Opus）
-2. 减少搜索结果数量（快速模式：3 条，深度模式：5 条）
-3. 限制爬取页面数量
-4. 使用 CDN 加速静态资源
-5. 增加服务器资源（CPU/内存）
-
-### 日志查看
-
-```bash
-# Docker 日志
-docker compose logs backend --tail 100 -f
-docker compose logs postgresql --tail 100 -f
-
-# Nginx 日志
-sudo tail -f /var/log/nginx/chatbot.access.log
-sudo tail -f /var/log/nginx/chatbot.error.log
-
-# 查看所有容器状态
-docker ps -a
-docker compose ps
-```
-
-更多问题请先查看 backend 与数据库容器的日志。
-
-## 🔮 未来计划
-
-- [ ] 支持更多 LLM 提供商（Groq, etc.）
-- [ ] 添加文件上传和分析功能
-- [ ] 实现对话导出（Markdown/PDF）
-- [ ] 优化流式响应性能
-
-## 🤝 贡献
-
-欢迎贡献！请随时提交 Issue 或 Pull Request。
+**测试与评测是两个系统**（[ADR-0026](./docs/adr/0026-tests-and-evals-are-two-systems.md)）。前者确定性、是门禁；后者非确定性、花钱、只给警告。
 
 ### 提交前本地自检
 
 ```bash ci-command
 uv sync --project backend --locked
 uv run --project backend pytest backend/tests
+uv run --project backend pytest backend/tests/contract_test.py -m contract --maxfail=1
 uv run --project backend ruff check --config=backend/pyproject.toml backend
 uv run --project backend ruff format --check --config=backend/pyproject.toml backend
 uv run --project backend mypy --config-file=backend/pyproject.toml backend
 ```
 
-### 贡献流程
+前端（在 `frontend/` 下执行）：
 
-1. Fork 本仓库
-2. 创建功能分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 创建 Pull Request
+```bash ci-command
+npm ci
+npm run lint
+npm run typecheck
+npm run build
+```
 
-## 📄 许可证
+> 上面两块打了 `ci-command` 标记，`scripts/check-readme-ci-commands.sh` 会断言它们**逐字**出现在 `.github/workflows/ci.yml` 里。**CI 是权威**——文档漂移会让这条检查变红。
 
-本项目采用 [MIT 许可证](LICENSE) 开源。
+### 门禁与警告
 
-## 👤 作者
+| 检查 | 阻断合并 | 说明 |
+|---|---|---|
+| Ruff · mypy · 后端测试 | ✅ | 打真 PostgreSQL，不用内存库 |
+| REST 契约测试 | ✅ | 进程内直打 FastAPI，确定性 |
+| 前端 lint · tsc · build | ✅ | 前端的门禁就是这三条 |
+| README 命令一致性 | ✅ | 就是上面那个断言 |
+| 提示词 / 工具集变更评测 | ⚠️ 警告 | 只在模型输入真的变了时才跑 |
+| 上游契约测试 | ⚠️ 不进 CI | 打真实网络，非确定性 |
 
-**Yuan**
+区别不在重要性，**在信号是否确定：会抖的信号不做门禁**。
 
-- 📝 博客: [https://blog.geekie.site](https://blog.geekie.site)
-- 📧 邮箱: [yuan.sn@outlook.com](mailto:yuan.sn@outlook.com)
-- 🔗 GitHub: [EllisYuan](https://github.com/EllisYuan)
+### 回放：零网络零数据库
 
-## 🙏 致谢
+用录好的运行事件序列驱动一次完整运行。录制物取自 `ModelPort` 边界，不是 HTTP 响应——因此它与上游 SDK 用哪个 HTTP 客户端库无关。
 
-本项目基于以下开源项目构建：
+### 评测
 
-- [FastAPI](https://fastapi.tiangolo.com/) - 高性能 API 框架
-- [LangChain](https://www.langchain.com/) - LLM 应用框架
-- [Anthropic Claude](https://www.anthropic.com/) - 强大的语言模型
-- [Tavily](https://tavily.com/) - AI 优化的搜索 API
+七个指标，五个零成本确定性 + 两个判官模型打分：
 
+| 指标 | 怎么算 |
+|---|---|
+| 引用忠实度 | 回答引用的来源 ∩ 模型实际观察到的来源，除以回答引用的来源 |
+| 工具触发率 | 该联网时联了、不该联网时没闲置联网的比例 |
+| 轨迹效率 | 硬上限触达率 · 重复读同一 URL · 搜完不读就作答，三个子信号的均值 |
+| 参数合规率 | 工具调用入参过当次工具 JSON Schema 的比例 |
+| 系统约束遵从度 | 实际迭代数对软预算的遵从 |
+| 事实幻觉率 | 判官模型打分 |
+| 任务完成度 | 判官模型打分 |
 
+**没有「工具误选率」**——两个语义正交的工具下，误选率恒为常数，没有区分度。
+
+评测在 PR 上**只在模型输入真的变了时**才触发：`eval-trigger` job 比较当前 checkout 与 base revision 的提示词 / 工具集内容哈希，按内容判断而非按文件路径，所以变量拼装逻辑的改动也会触发。触发后新旧两版**在同一次 CI 里用同一批数据、同一判官各跑一遍**，不读历史分数当基线——换了判官历史分数就不可比，所以每条结果都带**判官快照**。
+
+```bash
+# 默认不跑评测
+uv run --project backend pytest backend/tests
+
+# 显式跑
+uv run --project backend pytest -m eval backend/tests/evals
+```
+
+工具供应商在评测里被**冻结的夹具**替换（Tavily 与 Jina 两个 Port），但 `ModelPort` 不替换——**被评测的模型保持在线**，否则测的就不是模型了。
 
 ---
 
-<div align="center">
+## 目录结构
 
-**⭐ 如果这个项目对你有帮助，请给它一个星标！**
+```
+ChatAgents/
+├── backend/
+│   ├── src/chat_agents/
+│   │   ├── main.py              # FastAPI 装配 · 三重包装唯一组装处
+│   │   ├── conversation/        # 会话 · 消息 · 输入序列重建 · 观察掩蔽
+│   │   ├── agent/               # ReAct Loop · 工具执行器 · 版本化
+│   │   ├── llm/                 # ModelPort · 三协议适配器 · 发现 · 回放
+│   │   ├── tools/               # web_search · web_reader
+│   │   ├── observability/       # 跨度写入 · trace 查询 · 用量聚合
+│   │   ├── transport/           # AG-UI over SSE 编码
+│   │   ├── eval_summary/        # 站点评测展示面
+│   │   ├── db/                  # ORM：app 与 obs 两个 schema
+│   │   └── token_estimation.py  # 全项目唯一的 token 估算器
+│   ├── alembic/                 # 迁移（只增不改）
+│   ├── config/endpoints.yaml    # 端点档案
+│   └── tests/
+│       ├── evals/               # 评测（marker 隔离，不随默认测试跑）
+│       └── integration/         # 打真 PostgreSQL
+├── frontend/                    # React 19 + Vite + TanStack Query + Zustand
+│   └── src/features/            # session · sessions · trace · evals
+├── deploy/nginx/site.conf       # 应用属性那半份 nginx 配置
+├── docs/adr/                    # 33 份架构决策记录
+├── scripts/deploy.sh            # 发布 / 回滚
+├── compose.yaml                 # 本地
+├── compose.prod.yaml            # 线上叠加（换成 ghcr.io 镜像）
+└── CONTEXT.md                   # 术语表：只定义术语是什么
+```
 
-Made with ❤️ by Yuan
+## 契约
 
-</div>
+前后端之间的接口形状由**两个来源**共同构成，两者之外没有第三处（[ADR-0021](./docs/adr/0021-the-contract-has-two-sources.md)）：
+
+- **流式事件的信封**来自 AG-UI 的 schema（版本锁定的 `@ag-ui/core`）
+- **非流式 REST 面与本项目自有的事件载荷**来自后端代码生成的 OpenAPI 文档
+
+前端类型由 `openapi-typescript` 从后端导出的 schema 生成，**不提交类型副本**——任何手写的类型副本都不是契约，是它的复制品。
+
+主要端点：
+
+| 端点 | 说明 |
+|---|---|
+| `POST /api/runs` | 发起一次运行，返回 AG-UI over SSE 流 |
+| `GET /api/sessions` | 会话列表（复合游标分页） |
+| `GET /api/sessions/{session_id}/messages` | 会话消息 |
+| `GET /api/sessions/{session_id}/runs` | 该会话的运行列表，供客户端与消息序列合并 |
+| `GET /api/runs/{run_id}` | 运行详情：跨度树 · 用量汇总 · 运行配置 |
+| `GET /api/models` · `POST /api/models/refresh` | 模型清单与刷新 |
+| `GET /api/evals/summary` | 站点评测展示面的四个数字 |
+| `GET /health` | 版本号的唯一出口 |
+
+**URL 里没有版本号**（[ADR-0024](./docs/adr/0024-there-is-no-url-versioning.md)）——前后端同一个 tag 出厂、同进同退，给一个不会独立演进的东西加版本号只是仪式。
+
+---
+
+## 故障排查
+
+### 刷新 `/s/<uuid>` 返回 404
+
+`try_files` 没生效——要么宝塔站点配置漏了那行 `include`，要么 `root` 指向的目录不是当前发布版本。
+
+```bash
+nginx -T | grep -A3 "location /"
+readlink -f /www/chatagents/frontend/current
+```
+
+### 流式回复攒一坨才吐出来
+
+`/api/` 串了不止一层 nginx，或某一层缺了 `proxy_buffering off`。见上文「SSE 只能穿一层 nginx」——用 `curl -N` 实测确认逐条到达。
+
+### `/api/` 返回 404
+
+`proxy_pass` 末尾多了一条斜杠，把 `/api/` 前缀截断了：
+
+```nginx
+proxy_pass http://127.0.0.1:19180/;  # ❌ 末尾斜杠 → 路径被截断
+proxy_pass http://127.0.0.1:19180;   # ✓ 保留完整路径
+```
+
+### 集成测试连不上数据库
+
+先确认 `docker compose up -d postgresql` 起来了，且连接串里的 `@` 编码成了 `%40`。
+
+### 会话列表拿不到第二页
+
+游标是 `(before_updated_at, before_id)` **复合**的：第一页两项都省略，后续页**必须同时传**。query 参数没有 JSON `null` 的表达，客户端应当**省略**空值，不要发 `before_id=null`。
+
+### 会话历史丢了
+
+`compose.yaml` 用 named volume 持久化，正常重启不要带 `-v`：
+
+```bash
+docker compose down          # ✓
+docker compose down -v       # ❌ 永久删除 chatagent_postgres-data
+```
+
+备份：
+
+```bash
+docker compose exec postgresql pg_dump -U root -d chat_agents > chat_agents.sql
+```
+
+### 看日志
+
+```bash
+docker compose logs backend --tail 100 -f
+docker compose logs postgresql --tail 100 -f
+```
+
+> 流式路径的日志量是**每次运行 0~1 条**，不是每个 token 一条；而且**日志里不写模型输出的文本内容**。「一次运行内部发生了什么」归跨度，日志只记跨运行的系统事件。要看某次运行干了什么，去 trace，不要去日志。
+
+---
+
+## 文档
+
+| 文件 | 内容 |
+|---|---|
+| [`CONTEXT.md`](./CONTEXT.md) | 术语表——只定义术语**是什么**，不记录实现方式 |
+| [`docs/adr/`](./docs/adr/) | 33 份架构决策记录，含被否决方案与理由 |
+| [`docs/research/`](./docs/research/) | 选型阶段的调研报告 |
+| [`frontend/src/features/trace/SPEC.md`](./frontend/src/features/trace/SPEC.md) | 跨度树的客户端合并规则 |
+
+几份值得先读的 ADR：
+
+- [ADR-0001](./docs/adr/0001-messages-are-the-single-source-of-truth.md) 消息是唯一事实来源
+- [ADR-0007](./docs/adr/0007-backend-is-split-by-capability-not-by-layer.md) 后端按能力切，不按技术层切
+- [ADR-0019](./docs/adr/0019-old-observations-are-masked-not-summarized.md) 历史观察被掩蔽，不被摘要也不被丢弃
+- [ADR-0020](./docs/adr/0020-there-is-one-token-yardstick.md) token 只有一个口径
+- [ADR-0028](./docs/adr/0028-the-chat-surface-is-the-only-console.md) 聊天界面是唯一的控制台
+
+## 贡献
+
+1. Fork 并建分支
+2. **先起数据库**：`docker compose up -d postgresql`
+3. 跑一遍上面的自检块
+4. 提 PR
+
+代码注释与 ADR 用中文，代码标识符与 commit message 用英文，README 中英双语。
+
+## 许可证
+
+[MIT](./LICENSE)
+
+## 作者
+
+**Yuan** — [GitHub @EllisYuan](https://github.com/EllisYuan) · [yuan.sn@outlook.com](mailto:yuan.sn@outlook.com)
+
+## 致谢
+
+[FastAPI](https://fastapi.tiangolo.com/) · [AG-UI](https://github.com/ag-ui-protocol/ag-ui) · [SQLAlchemy](https://www.sqlalchemy.org/) · [React](https://react.dev/) · [Vite](https://vite.dev/) · [Anthropic](https://www.anthropic.com/) · [OpenAI](https://openai.com/) · [Tavily](https://tavily.com/) · [Jina Reader](https://jina.ai/reader/)
