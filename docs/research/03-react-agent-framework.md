@@ -131,7 +131,7 @@
    yield AgentEvent(type="step_usage", prompt_tokens=150, completion_tokens=42)
    ```
 3. **彻底推翻类继承 Hack**：
-   现有 `backend/agent.py` 中的 `SummarizingTavilyExtract` 是通过继承 Tavily 工具类并覆写 `_run` / `_arun` 实现的。在自建 Loop 中，工具函数只是标准的异步 Python 函数，摘要与超时可以作为通用的 Tool Runner 中间件注入：
+   现有 `backend/src/chat_agents/agent` 中的 `SummarizingTavilyExtract` 是通过继承 Tavily 工具类并覆写 `_run` / `_arun` 实现的。在自建 Loop 中，工具函数只是标准的异步 Python 函数，摘要与超时可以作为通用的 Tool Runner 中间件注入：
    ```python
    async def execute_tool_with_middleware(tool_func, tool_args, user_message):
        # 1. 统一超时
@@ -306,7 +306,7 @@ def test_trajectory_eval_from_fixture():
 | :--- | :--- | :--- |
 | **从 `langchain-tavily` 依赖剥离** | 低 | Tavily 官方提供了原生的 `tavily-python` SDK (v0.7.6)。直接使用 `AsyncTavilyClient` 封装 3 个异步工具函数（`search`, `extract`, `crawl`），彻底剥离 `langchain-tavily`。 |
 | **Prompt 解析兼容性（Thought/Action）** | 低 | 现代模型（OpenAI GPT-4o / Anthropic Claude 3.5/3.7）原生支持 Native Tool Calling。提示词可精简，不再强制要求文本正则解析 ReAct 格式。 |
-| **FastAPI `app.py` 流式接口对接** | 中 | 现有的 `backend/agent.py` 被新 `ReActAgent` 替换。`app.py` 需改为监听新的 SSE `AgentEvent` 事件流，此工作属于前后端分离重构的预定步骤。 |
+| **FastAPI `backend/src/chat_agents/main.py` 流式接口对接** | 中 | 现有的 `backend/src/chat_agents/agent` 被新 `ReActAgent` 替换。`backend/src/chat_agents/main.py` 需改为监听新的 SSE `AgentEvent` 事件流，此工作属于前后端分离重构的预定步骤。 |
 
 ---
 

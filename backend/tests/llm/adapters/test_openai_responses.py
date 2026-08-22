@@ -2,6 +2,7 @@
 
 import asyncio
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from chat_agents.llm.adapters.openai_responses import OpenAIResponsesAdapter
@@ -77,7 +78,7 @@ def _function_call_item(call_id: str, *, arguments: str = '{"a": 1, "b": 3}') ->
     )
 
 
-def _happy_path_events() -> list[object]:
+def _happy_path_events() -> list[Any]:
     return [
         SimpleNamespace(
             type="response.output_item.added",
@@ -203,7 +204,6 @@ def test_happy_path_completed_message_and_usage() -> None:
         "type": "reasoning",
         "id": "rs_1",
         "encrypted_content": "opaque-blob",
-        "summary": [],
     }
     assert text == TextBlock(text="the answer is ")
     assert tool_call == ToolCallBlock(id="call_1", name="add", arguments={"a": 1, "b": 3})
@@ -255,3 +255,23 @@ def test_interruption_after_usage_known_reports_partial_usage() -> None:
     assert usage.input_tokens is None
     assert usage.output_tokens is None
     assert completed[0].stop_reason == "interrupted"
+
+
+def test_completed_reasoning_opaque_payload_excludes_display_summary() -> None:
+    events = _happy_path_events()
+    events[-1].response.output[0].summary = [SimpleNamespace(type="summary_text", text="可读摘要")]
+
+    completed = [
+        event
+        for event in asyncio.run(_collect(_FakeClient(_FakeRawStream(events))))
+        if isinstance(event, ModelCallCompleted)
+    ]
+
+    assert len(completed) == 1
+    opaque = completed[0].message.content[0]
+    assert isinstance(opaque, OpaqueBlock)
+    assert opaque.data == {
+        "type": "reasoning",
+        "id": "rs_1",
+        "encrypted_content": "opaque-blob",
+    }

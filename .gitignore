@@ -41,9 +41,6 @@ env/
 .env
 .env.local
 
-# Streamlit
-.streamlit/secrets.toml
-
 # 日志
 *.log
 
@@ -55,6 +52,7 @@ Thumbs.db
 .pytest_cache/
 .coverage
 htmlcov/
+.eval-reports/
 
 # 临时文件
 *.tmp

@@ -55,9 +55,16 @@ def _serialize_message(message: ModelMessage) -> list[dict[str, Any]]:
 
 
 def build_request(
-    *, messages: Sequence[ModelMessage], tools: Sequence[Any], model: str, effort: EffortTier
+    *,
+    messages: Sequence[ModelMessage],
+    tools: Sequence[Any],
+    model: str,
+    effort: EffortTier,
+    system_prompt: str | None = None,
 ) -> dict[str, Any]:
     native_messages: list[dict[str, Any]] = []
+    if system_prompt:
+        native_messages.append({"role": "system", "content": system_prompt})
     for message in messages:
         native_messages.extend(_serialize_message(message))
     payload: dict[str, Any] = {
@@ -172,9 +179,16 @@ class OpenAIChatCompletionsAdapter:
         model: str,
         effort: EffortTier,
         profile: EndpointProfile,
+        system_prompt: str | None = None,
     ) -> AsyncIterator[ModelEvent]:
         del profile
-        payload = build_request(messages=messages, tools=tools, model=model, effort=effort)
+        payload = build_request(
+            messages=messages,
+            tools=tools,
+            model=model,
+            effort=effort,
+            system_prompt=system_prompt,
+        )
         acc = _Accumulator()
         raw_stream = await self._client.chat.completions.create(**payload)
         try:

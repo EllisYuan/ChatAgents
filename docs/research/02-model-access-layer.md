@@ -29,8 +29,8 @@
 4. 并行工具调用需要分成两个概念：**模型一次返回多个调用**与**应用是否并发执行这些调用**。OpenAI 用顶层 `parallel_tool_calls`；Anthropic 可在一个 assistant turn 中返回多个 `tool_use` block，并通过 `tool_choice.disable_parallel_tool_use` 控制是否允许多个调用；真正并发还是顺序执行应归 Tool Executor，而不是模型 client。[S5][S11]
 5. LangChain 现有适配器适合作为迁移期 bridge，不适合作为长期领域边界。当前代码直接依赖 `BaseChatModel` 和已在 LangGraph v1 中弃用的 `create_react_agent`，若继续把 model access 暴露为 LangChain 类型，未来换 agent 框架仍需重写这一层。[S14][S15][S16]
 6. **密钥来源分两层，用户优先、未填则降级到服务端预设。** 服务端环境变量预设让 demo 开箱即用（用户无感知）；前端「高级选项」允许访客填入自己的 `base_url` / `protocol` / `auth_field` / key。**用户填了就用用户的，没填才用服务端的**；用户 key 调用失败时**如实报错，不静默 fallback 到服务端 key**，否则成本归属会失真。两层共用同一个 `EndpointProfile` 结构，适配层不需要知道这次用的是谁的 key。详见第十二章。
-7. **模型清单必须运行时发现，不得前后端各硬编码一份。** 现状 `llm_config.py:27-48` 与 `streamlit_app.py:590-605` 各存一份清单且无同步机制——这正是无效型号 ID 能长期潜伏的原因（`.get(model, 默认值)` 会静默回退）。改为后端按 protocol 调用模型列表接口发现、下发给前端；发现失败回退静态兜底并标记 `source=fallback`；用户指定的无效 model ID **显式报错而非静默替换**。详见 12.8。
-8. **模型角色分离：主模型与 tool 模型各自独立可配。** 现状 `app.py:163-172` 把工具摘要模型硬编码为 Claude Haiku——用户主模型选 OpenAI 时仍会去调 Anthropic，既可能直接失败，也会让用户自带 key 的场景意外消耗项目方额度。规则：**tool 模型默认跟随主模型**（保证零配置时无跨厂商意外调用），用户可在高级选项独立覆盖，甚至指向完全不同的 endpoint profile。trace 须按角色区分用量。详见 12.9。
+7. **模型清单必须运行时发现，不得前后端各硬编码一份。** 现状 `llm_config.py:27-48` 与 `frontend/src` 各存一份清单且无同步机制——这正是无效型号 ID 能长期潜伏的原因（`.get(model, 默认值)` 会静默回退）。改为后端按 protocol 调用模型列表接口发现、下发给前端；发现失败回退静态兜底并标记 `source=fallback`；用户指定的无效 model ID **显式报错而非静默替换**。详见 12.8。
+8. **模型角色分离：主模型与 tool 模型各自独立可配。** 现状 `backend/src/chat_agents/main.py:163-172` 把工具摘要模型硬编码为 Claude Haiku——用户主模型选 OpenAI 时仍会去调 Anthropic，既可能直接失败，也会让用户自带 key 的场景意外消耗项目方额度。规则：**tool 模型默认跟随主模型**（保证零配置时无跨厂商意外调用），用户可在高级选项独立覆盖，甚至指向完全不同的 endpoint profile。trace 须按角色区分用量。详见 12.9。
 9. 统一网关不是不能用，而是不应默认承担协议正确性。LiteLLM、Bifrost、New API 都能提供双格式入口或跨格式转换，但跨 provider 的 tools、并行控制、usage、错误与流中途失败仍存在文档空白或已能从源码看到的转换缺口，必须逐 endpoint 原型认证。[S22][S23][S25][S26]
 
 ### 决策句
@@ -84,13 +84,13 @@ model: claude-sonnet-x
 
 | 位置 | 当前事实 | 对选型的影响 |
 |---|---|---|
-| `backend/llm_config.py:14-19` | `LLMProvider` 只有 `claude/openai/groq`，表达的是厂商名 | 无法表达“Claude 模型走 OpenAI 格式”或“非 Anthropic 模型走 Messages 格式” |
-| `backend/llm_config.py:51-120` | `ChatAnthropic`、`ChatOpenAI` 工厂没有 `base_url`、headers、timeout、retry、capability 参数 | 不满足自定义中转；也无法显式管理重试所有权与 beta/version header |
-| `backend/llm_config.py:27-48` | 模型列表硬编码在 Python 字典中 | endpoint、协议与模型生命周期被绑死在业务代码；别名和真实 model ID 容易漂移 |
-| `app.py:129-169` | 主模型按 provider 分支创建；摘要模型始终优先创建 Claude | 只配置 OpenAI 格式 endpoint 时，摘要路径仍会尝试 Anthropic；双格式支持并不贯穿整条调用链 |
-| `app.py:217-325` | 只消费 LangGraph 文本 callback；没有收集 provider usage、request ID、finish reason 或 TTFT | 当前即使底层 SDK 返回 usage，也没有稳定通道交给可观测性层 |
-| `app.py:211-214, 435-445` | `tool_calls_list` 被初始化但没有写入 | 会话记录无法可靠还原工具调用，后续 trace/eval 也缺少原始事实 |
-| `backend/agent.py:3,108-225` | graph 接口直接接收 `BaseChatModel`，并调用 `langgraph.prebuilt.create_react_agent` | 模型层与 LangChain/LangGraph 类型耦合；当前 API 又已进入弃用迁移路径 [S16] |
+| `backend/src/chat_agents/llm/14-19` | `LLMProvider` 只有 `claude/openai/groq`，表达的是厂商名 | 无法表达“Claude 模型走 OpenAI 格式”或“非 Anthropic 模型走 Messages 格式” |
+| `backend/src/chat_agents/llm/51-120` | `ChatAnthropic`、`ChatOpenAI` 工厂没有 `base_url`、headers、timeout、retry、capability 参数 | 不满足自定义中转；也无法显式管理重试所有权与 beta/version header |
+| `backend/src/chat_agents/llm/27-48` | 模型列表硬编码在 Python 字典中 | endpoint、协议与模型生命周期被绑死在业务代码；别名和真实 model ID 容易漂移 |
+| `backend/src/chat_agents/main.py:129-169` | 主模型按 provider 分支创建；摘要模型始终优先创建 Claude | 只配置 OpenAI 格式 endpoint 时，摘要路径仍会尝试 Anthropic；双格式支持并不贯穿整条调用链 |
+| `backend/src/chat_agents/main.py:217-325` | 只消费 LangGraph 文本 callback；没有收集 provider usage、request ID、finish reason 或 TTFT | 当前即使底层 SDK 返回 usage，也没有稳定通道交给可观测性层 |
+| `backend/src/chat_agents/main.py:211-214, 435-445` | `tool_calls_list` 被初始化但没有写入 | 会话记录无法可靠还原工具调用，后续 trace/eval 也缺少原始事实 |
+| `backend/src/chat_agents/agent/3,108-225` | graph 接口直接接收 `BaseChatModel`，并调用 `langgraph.prebuilt.create_react_agent` | 模型层与 LangChain/LangGraph 类型耦合；当前 API 又已进入弃用迁移路径 [S16] |
 | `requirements.txt:9-19` | 使用 LangChain 0.3 / LangGraph 0.4 代际依赖；`langchain-anthropic>=0.1.0` 还未给上界或精确版本 | 不能把旧版本行为当作 2026 当前能力；后续应通过 contract tests 锁定实际版本组合 |
 
 本票不修改业务代码，但这些现状决定了推荐方案不能只是在现有工厂函数上补一个 `base_url` 参数：还必须把“协议、endpoint、事件、usage、错误”的边界从 agent 框架类型中抽出来。
@@ -242,7 +242,7 @@ LangChain 当前文档确认：
 - 两者支持流式、标准化 `tool_calls` 和 `usage_metadata`；
 - 但 `ChatOpenAI` 只处理官方 OpenAI 规范，第三方非标准字段不会保留，官方建议需要 provider 特性时使用专用集成。[S14][S15]
 
-这与当前代码集成成本最低，但长期问题是类型耦合。`backend/agent.py` 把 `BaseChatModel` 直接当核心接口，而 `create_react_agent` 已进入弃用路径。[S16] 因此它可以作为迁移 shim，不能成为目标架构的 `ModelPort`。
+这与当前代码集成成本最低，但长期问题是类型耦合。`backend/src/chat_agents/agent` 把 `BaseChatModel` 直接当核心接口，而 `create_react_agent` 已进入弃用路径。[S16] 因此它可以作为迁移 shim，不能成为目标架构的 `ModelPort`。
 
 ### 6.6 Pydantic AI
 
@@ -470,7 +470,7 @@ Project-owned ModelPort <--------------+
 3. 实现三个 adapter，使用官方 async clients，显式配置 timeout/retries：**`OpenAIResponsesAdapter`（优先）**、`OpenAIChatCompletionsAdapter`、`AnthropicMessagesAdapter`。三者共享 `ModelPort` 出口契约，内部不互相翻译。
 4. 让 ReAct runtime 消费 finalized tool calls，让 Tool Executor 负责并发与回传。
 5. 将 trace/token/latency/cost 接到规范化事件；usage 不完整时在 UI 明示，而不是估算成“精确值”。
-6. **把模型角色拆成 main / tool 两个独立配置**（详见 12.9）：移除 `app.py:163-172` 摘要模型硬编码 Claude Haiku 的假设；tool 模型默认跟随主模型，可在高级选项独立覆盖，甚至指向不同的 endpoint profile。trace 按角色区分用量。
+6. **把模型角色拆成 main / tool 两个独立配置**（详见 12.9）：移除 `backend/src/chat_agents/main.py:163-172` 摘要模型硬编码 Claude Haiku 的假设；tool 模型默认跟随主模型，可在高级选项独立覆盖，甚至指向不同的 endpoint profile。trace 按角色区分用量。
 7. **实现模型运行时发现**（详见 12.8）：后端按 protocol 调模型列表接口，经 `GET /api/models` 下发；前端选单不得硬编码。发现失败回退静态兜底并标 `source=fallback`；无效 model ID 显式报错而非静默替换。
 8. **实现两层密钥来源**（详见第十二章）：服务端 `EndpointProfile` 预设作默认；前端「高级选项」支持用户自定义（常用供应商预设 + 自定义地址/格式/认证字段）。**用户填了优先用用户的，未填才降级到预设**；用户 key 失败不静默 fallback。两层共用同一 `EndpointProfile` 结构。
 9. 同步落实用户密钥的卫生要求：强制 HTTPS、服务端不持久化、trace 排除密钥字段、前端仅用 `sessionStorage`、UI 明示「仅本次会话使用」。
@@ -591,7 +591,7 @@ endpoints:
 
 ### 12.7 与现状的关系
 
-`app.py:112-116` 现在已经是 `request.headers.get("X-Claude-Key") or os.getenv("ANTHROPIC_API_KEY")` 的形态——**本章规则正是这一既有行为的正式化与扩展**，而非新发明。差异在于：
+`backend/src/chat_agents/main.py:112-116` 现在已经是 `request.headers.get("X-Claude-Key") or os.getenv("ANTHROPIC_API_KEY")` 的形态——**本章规则正是这一既有行为的正式化与扩展**，而非新发明。差异在于：
 
 | | 现状 | 本章规则 |
 |---|---|---|
@@ -601,7 +601,7 @@ endpoints:
 | 供应商预设 | 无 | 常用供应商选单 |
 | 安全说明 | 无 | UI 明示 + 不持久化 + sessionStorage |
 
-`backend/llm_config.py` 目前把模型 ID 硬编码在字典里、无 base_url、无 auth_field、`provider` 混淆厂商与协议，是这一整块的替换对象。
+`backend/src/chat_agents/llm` 目前把模型 ID 硬编码在字典里、无 base_url、无 auth_field、`provider` 混淆厂商与协议，是这一整块的替换对象。
 
 ### 12.8 模型清单：从硬编码改为运行时发现
 
@@ -611,8 +611,8 @@ endpoints:
 
 | 位置 | 内容 |
 |---|---|
-| `backend/llm_config.py:27-48` | `CLAUDE_MODELS` / `OPENAI_MODELS` 字典，别名 → 真实 model ID |
-| `streamlit_app.py:590-605` | **前端又硬编码一份**别名 → 展示名 |
+| `backend/src/chat_agents/llm/27-48` | `CLAUDE_MODELS` / `OPENAI_MODELS` 字典，别名 → 真实 model ID |
+| `frontend/src` | **前端又硬编码一份**别名 → 展示名 |
 
 两份清单没有任何同步机制。后端加一个模型，前端看不见；前端改一个别名，后端 `.get(model, 默认值)` 会**静默回退**到默认模型而不报错——这正是 `claude-opus-4-1-202508059`（日期段 9 位的无效 ID）能一直躺在代码里没被发现的原因。
 
@@ -656,7 +656,7 @@ GET /api/models?profile=<name>        <-- 后端返回该 endpoint 实际可用�
 
 #### 现状的病根：tool 模型硬编码为 Claude Haiku
 
-`app.py:163-172`：
+`backend/src/chat_agents/main.py:163-172`：
 
 ```python
 summary_llm = LLMConfig.create_claude(   # 硬编码 Claude
@@ -702,7 +702,7 @@ summary_llm = LLMConfig.create_claude(   # 硬编码 Claude
 - **#12（API 契约标准化）** — 承接 `GET /api/models` 的契约设计：发现结果、`source` 标记、错误语义。
 - **#18（trace 界面呈现）** — 承接「本次用的是用户 key 还是服务端预设」的呈现，以及**主模型与 tool 模型的调用/成本如何分别展示**。
 - **#4 的 trace 数据模型** — 须显式排除密钥字段，记录密钥来源，**并按模型角色区分 span 与用量**。
-- **#6 前端栈** — 模型选单需从后端接口动态渲染，不得硬编码（现状 `streamlit_app.py:590-605` 的做法不可延续到 React 版）。
+- **#6 前端栈** — 模型选单需从后端接口动态渲染，不得硬编码（现状 `frontend/src` 的做法不可延续到 React 版）。
 
 > **来源说明**：本章 ccswitch 相关内容依据用户提供的界面截图（2026-08-06）总结其字段设计。ccswitch 项目本身的仓库地址、版本与实现细节**未经核实**（本会话网络搜索额度已用尽），故只借鉴其**配置抽象**，不对该工具的实现或成熟度作任何断言。
 

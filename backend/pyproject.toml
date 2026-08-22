@@ -9,7 +9,6 @@ version = "0.0.0"
 description = "Yuan's Chat Agents backend"
 requires-python = ">=3.11,<3.13"
 dependencies = [
-    "streamlit>=1.32.0",
     "fastapi>=0.109.1",
     "uvicorn==0.27.0",
     "python-dotenv==1.1.0",
@@ -38,14 +37,19 @@ dependencies = [
     "openai>=3.0.0,<4",
     "httpx2>=2.9,<3",
     "anthropic>=0.99.0,<1",
+    "ag-ui-protocol==0.1.19",
+    "sse-starlette>=3.4.8",
+    "structlog>=26.1.0",
 ]
 
 [dependency-groups]
 dev = [
+    "jsonschema>=4.26.0",
     "mypy>=1.13.0",
     "pre-commit>=4.6.2",
     "pytest>=8.3.0",
     "ruff>=0.9.0",
+    "schemathesis==4.24.3",
     "types-requests>=2.33.0.20260712",
 ]
 
@@ -85,6 +89,10 @@ init_typed = true
 warn_required_dynamic_aliases = true
 
 [tool.pytest.ini_options]
+addopts = '-m "not eval and not upstream and not contract"'
 markers = [
+    "eval: paid or comparative evaluation; excluded from the default test run",
+    "upstream: calls a live upstream service; excluded from the default test run",
     "db: requires a running PostgreSQL database",
+    "contract: in-process OpenAPI contract gate",
 ]

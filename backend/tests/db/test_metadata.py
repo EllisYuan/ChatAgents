@@ -64,3 +64,15 @@ def test_all_foreign_keys_point_obs_to_app_only() -> None:
         for fk in table.foreign_keys:
             target_schema = fk.column.table.schema
             assert not (table_schema == "app" and target_schema == "obs")
+
+
+def test_version_tables_deduplicate_content_snapshots() -> None:
+    prompt_versions = _table("app", "prompt_versions")
+    tool_versions = _table("app", "tool_schema_versions")
+
+    assert {
+        "uq_prompt_versions_name_hash",
+    } <= {constraint.name for constraint in prompt_versions.constraints}
+    assert {
+        "uq_tool_schema_versions_name_effort_hash",
+    } <= {constraint.name for constraint in tool_versions.constraints}

@@ -6,6 +6,7 @@
 
 import asyncio
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from chat_agents.llm.adapters.anthropic_messages import AnthropicMessagesAdapter
@@ -70,7 +71,7 @@ class _FakeClient:
         self.messages = _FakeMessages(stream)
 
 
-def _happy_path_events() -> list[object]:
+def _happy_path_events() -> list[Any]:
     return [
         SimpleNamespace(
             type="message_start",
@@ -245,6 +246,27 @@ def test_interruption_after_message_start_reports_partial_usage() -> None:
     assert usage.output_tokens is None
     assert usage.output_tokens != 0
     assert completed[0].stop_reason == "interrupted"
+
+
+def test_thinking_block_preserves_start_payload_before_deltas() -> None:
+    events = _happy_path_events()
+    events[1].content_block.thinking = "already present"
+    events[1].content_block.signature = "start-signature"
+
+    completed = [
+        event
+        for event in asyncio.run(_collect(_FakeClient(_FakeRawStream(events))))
+        if isinstance(event, ModelCallCompleted)
+    ]
+
+    assert len(completed) == 1
+    opaque = completed[0].message.content[0]
+    assert isinstance(opaque, OpaqueBlock)
+    assert opaque.data == {
+        "type": "thinking",
+        "thinking": "already presentlet me think",
+        "signature": "start-signaturesig-abc",
+    }
 
 
 def test_interruption_before_any_data_reports_unavailable_usage() -> None:

@@ -32,6 +32,7 @@ class ModelPort(TypingProtocol):
         model: str,
         effort: EffortTier,
         profile: EndpointProfile,
+        system_prompt: str | None = None,
     ) -> AsyncIterator[ModelEvent]: ...
 
 

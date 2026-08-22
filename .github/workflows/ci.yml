@@ -2,6 +2,16 @@ name: CI
 
 on:
   pull_request:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Run the release retention-window grid
+        required: false
+        default: false
+        type: boolean
+  push:
+    tags:
+      - "v*"
 
 permissions:
   contents: read
@@ -11,18 +21,18 @@ jobs:
     name: Ruff, mypy, and database integration
     runs-on: ubuntu-latest
     env:
-      DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/chat_agents
+      DATABASE_URL: postgresql+psycopg://root:Agent%40Dev_1@localhost:5432/chat_agents
     services:
-      postgres:
+      postgresql:
         image: postgres:18.4
         env:
           POSTGRES_DB: chat_agents
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: root
+          POSTGRES_PASSWORD: Agent@Dev_1
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U postgres -d chat_agents"
+          --health-cmd "pg_isready -U root -d chat_agents"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 5
@@ -37,12 +47,216 @@ jobs:
         run: uv sync --project backend --locked
       - name: Run backend tests
         run: uv run --project backend pytest backend/tests
+      - name: Run in-process REST contract gate
+        run: uv run --project backend pytest backend/tests/contract_test.py -m contract --maxfail=1
       - name: Run Ruff lint
         run: uv run --project backend ruff check --config=backend/pyproject.toml backend
       - name: Check Ruff formatting
         run: uv run --project backend ruff format --check --config=backend/pyproject.toml backend
       - name: Run mypy
         run: uv run --project backend mypy --config-file=backend/pyproject.toml backend
+
+  eval-trigger:
+    name: Detect model-input changes
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      eval_changed: ${{ steps.compare.outputs.eval_changed }}
+      eval_changed_inputs: ${{ steps.compare.outputs.eval_changed_inputs }}
+      eval_baseline_missing: ${{ steps.compare.outputs.eval_baseline_missing }}
+    env:
+      DATABASE_URL: postgresql+psycopg://root:Agent%40Dev_1@localhost:5432/chat_agents
+    services:
+      postgresql:
+        image: postgres:18.4
+        env:
+          POSTGRES_DB: chat_agents
+          POSTGRES_USER: root
+          POSTGRES_PASSWORD: Agent@Dev_1
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U root -d chat_agents"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Check out pull request revision
+        uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Sync locked dependencies
+        run: uv sync --project backend --locked
+      - name: Create database schema
+        run: uv run --project backend python -m alembic -c backend/alembic.ini upgrade head
+      - name: Fetch base revision
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$BASE_SHA" ]]; then
+            git fetch --no-tags --depth=1 origin "$BASE_SHA"
+            base_ref="$BASE_SHA"
+          else
+            git fetch --no-tags --depth=1 origin "$DEFAULT_BRANCH"
+            base_ref="origin/$DEFAULT_BRANCH"
+          fi
+          git worktree add "$RUNNER_TEMP/chatagents-base" "$base_ref"
+      - name: Seed base revision as the temporary baseline
+        env:
+          CHATAGENTS_SOURCE_ROOT: ${{ runner.temp }}/chatagents-base
+        run: uv run --project backend python scripts/check-eval-trigger.py --seed
+      - name: Compare current content hashes
+        id: compare
+        run: uv run --project backend python scripts/check-eval-trigger.py --check --output "$GITHUB_OUTPUT"
+
+  eval:
+    name: Prompt and tool evals (warning only)
+    needs: eval-trigger
+    if: >-
+      needs.eval-trigger.outputs.eval_changed == 'true' &&
+      !contains(github.event.pull_request.labels.*.name, 'skip-eval')
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql+psycopg://root:Agent%40Dev_1@localhost:5432/chat_agents
+      EVAL_CASES_PER_EFFORT: "8"
+      EVAL_TOTAL_CASES: "32"
+      EVAL_JUDGE_MODEL: ${{ secrets.EVAL_JUDGE_MODEL }}
+      EVAL_ENDPOINT_PROFILE: ${{ secrets.EVAL_ENDPOINT_PROFILE }}
+    services:
+      postgresql:
+        image: postgres:18.4
+        env:
+          POSTGRES_DB: chat_agents
+          POSTGRES_USER: root
+          POSTGRES_PASSWORD: Agent@Dev_1
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U root -d chat_agents"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Sync locked dependencies
+        run: uv sync --project backend --locked
+      - name: Create database schema
+        run: uv run --project backend python -m alembic -c backend/alembic.ini upgrade head
+      - name: Run the changed-input eval batch
+        run: uv run --project backend python scripts/run-eval-ci.py --run both
+      - name: Upload eval metadata
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-metadata-${{ github.sha }}
+          path: .eval-reports
+          if-no-files-found: ignore
+
+  release-eval:
+    name: Release retention-window eval (${{ matrix.retention_window }})
+    if: >-
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.release == true)
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        retention_window: [1, 2, 3, 5, 8]
+    env:
+      DATABASE_URL: postgresql+psycopg://root:Agent%40Dev_1@localhost:5432/chat_agents
+      EVAL_CASES_PER_EFFORT: "8"
+      EVAL_TOTAL_CASES: "32"
+      EVAL_RETENTION_WINDOW: ${{ matrix.retention_window }}
+      EVAL_RELEASE_JUDGE_MODEL: ${{ secrets.EVAL_RELEASE_JUDGE_MODEL }}
+      EVAL_ENDPOINT_PROFILE: ${{ secrets.EVAL_ENDPOINT_PROFILE }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Sync locked dependencies
+        run: uv sync --project backend --locked
+      - name: Run release retention-window eval
+        run: uv run --project backend python scripts/run-eval-ci.py --run new --retention-window ${{ matrix.retention_window }}
+      - name: Upload release eval metadata
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-eval-metadata-${{ github.sha }}-${{ matrix.retention_window }}
+          path: .eval-reports
+          if-no-files-found: ignore
+
+  openapi-contract:
+    name: Generate OpenAPI contract artifact
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Sync locked dependencies
+        run: uv sync --project backend --locked
+      - name: Export OpenAPI schema
+        run: uv run --project backend python scripts/export-openapi.py "$RUNNER_TEMP/chatagents-openapi.json"
+      - name: Upload OpenAPI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: chatagents-openapi-${{ github.sha }}
+          path: ${{ runner.temp }}/chatagents-openapi.json
+          if-no-files-found: error
+          retention-days: 1
+
+  frontend-quality:
+    name: Frontend lint, typecheck, and build
+    runs-on: ubuntu-latest
+    needs: openapi-contract
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Download OpenAPI artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: chatagents-openapi-${{ github.sha }}
+          path: ${{ runner.temp }}
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Run frontend lint
+        run: npm run lint
+      # OPENAPI_INPUT 只能落在 step 级：runner context 在 job 级 env 里不可用，
+      # 写在那儿会让整份 workflow 判为无效（零 job 运行，且报错不指向具体行）。
+      - name: Check frontend types
+        env:
+          OPENAPI_INPUT: ${{ runner.temp }}/chatagents-openapi.json
+        run: npm run typecheck
+      - name: Build frontend
+        env:
+          OPENAPI_INPUT: ${{ runner.temp }}/chatagents-openapi.json
+        run: npm run build
 
   readme-command-consistency:
     name: README command consistency

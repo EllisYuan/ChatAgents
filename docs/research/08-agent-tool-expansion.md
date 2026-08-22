@@ -20,7 +20,7 @@
    - **绝不引入浏览器自动化（Playwright / `browser-use`）**（单次执行膨胀 15-40s，Trace 包含大量 DOM/BBOX 杂质，破坏轨迹评测）。
    - **绝不引入沙箱代码执行（E2B / Docker Sandbox）**（偏离 Web 搜索研究核心叙事，增加算力开销与安全攻击面）。
    - **绝不引入本地向量记忆 / RAG（pgvector / Chroma）**（违反地图 #1 明确禁令 "RAG/文档问答 Out of Scope"）。
-3. **架构解耦重构**：彻底废弃 `backend/agent.py` 中通过 Python 类继承覆写 `_run` / `_arun` 注入摘要逻辑的 **SummarizingTavily 继承 Hack**。全面改用“工具原生返回结构化数据 -> ReAct Loop 原生传递 -> 可观测性 Hook 自动拦截”的无侵入管道设计。
+3. **架构解耦重构**：彻底废弃 `backend/src/chat_agents/agent` 中通过 Python 类继承覆写 `_run` / `_arun` 注入摘要逻辑的 **SummarizingTavily 继承 Hack**。全面改用“工具原生返回结构化数据 -> ReAct Loop 原生传递 -> 可观测性 Hook 自动拦截”的无侵入管道设计。
 
 ### 1.2 置信度评估
 - **综合置信度**：**95% (High)**
@@ -120,7 +120,7 @@
 ### 5.2 客观评估：Tavily 的保留与替代策略
 - **Tavily Search 予以保留**：作为主 Web 搜索入口，Tavily Search 在新闻、通用实时信息上的 Semantic Ranking 表现依然极其稳定。
 - **废弃 Tavily Extract & Tavily Crawl**：
-  1. 当前代码中为了处理 Tavily Extract/Crawl 返回的庞大原始字符串，在 `backend/agent.py` 中不得不使用一个 secondary `summary_llm` 进行二次 LLM 总结（即 `SummarizingTavilyExtract`）。这导致单次工具调用**产生额外的 LLM Token 开销与 1-2 秒延迟**！
+  1. 当前代码中为了处理 Tavily Extract/Crawl 返回的庞大原始字符串，在 `backend/src/chat_agents/agent` 中不得不使用一个 secondary `summary_llm` 进行二次 LLM 总结（即 `SummarizingTavilyExtract`）。这导致单次工具调用**产生额外的 LLM Token 开销与 1-2 秒延迟**！
   2. Jina Reader (`r.jina.ai`) 提供了一个极简方案：直接 `GET https://r.jina.ai/https://example.com`，即刻返回已经剥离广告、结构良好的 Markdown。LLM 可以直接阅读，**完全不再需要二级 summary_llm**！
 
 ---
@@ -183,10 +183,10 @@ async def web_reader(url: str) -> str:
 ## 8. 工具层重构与抽象建议（彻底消除继承 Hack）
 
 ### 8.1 现有代码的“继承 Hack”痛点分析
-在 `backend/agent.py` 中，现有代码通过以下方式扩展 Tavily 工具：
+在 `backend/src/chat_agents/agent` 中，现有代码通过以下方式扩展 Tavily 工具：
 
 ```python
-# 现有的 Hack 模式 (backend/agent.py:181-203)
+# 现有的 Hack 模式 (backend/src/chat_agents/agent:181-203)
 class SummarizingTavilyExtract(TavilyExtract):
     def _run(self, *args, **kwargs):
         kwargs.pop('run_manager', None)

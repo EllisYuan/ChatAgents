@@ -90,7 +90,10 @@ class PromptVersion(Base):
     """
 
     __tablename__ = "prompt_versions"
-    __table_args__: ClassVar[dict] = {"schema": APP_SCHEMA}
+    __table_args__ = (
+        UniqueConstraint("name", "content_hash", name="uq_prompt_versions_name_hash"),
+        {"schema": APP_SCHEMA},
+    )
 
     # version_id = f"{name}@{created_at}-{content_hash}"，内容的纯函数（ADR-0011）。
     version_id: Mapped[str] = mapped_column(String, primary_key=True)
@@ -111,7 +114,15 @@ class ToolSchemaVersion(Base):
     """
 
     __tablename__ = "tool_schema_versions"
-    __table_args__: ClassVar[dict] = {"schema": APP_SCHEMA}
+    __table_args__ = (
+        UniqueConstraint(
+            "name",
+            "effort_tier",
+            "content_hash",
+            name="uq_tool_schema_versions_name_effort_hash",
+        ),
+        {"schema": APP_SCHEMA},
+    )
 
     version_id: Mapped[str] = mapped_column(String, primary_key=True)
     name: Mapped[str] = mapped_column(String, nullable=False)

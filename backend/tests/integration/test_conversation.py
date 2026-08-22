@@ -12,7 +12,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-_DATABASE_URL = "postgresql+psycopg://postgres:postgres@localhost:5432/chat_agents"
+_DATABASE_URL = "postgresql+psycopg://root:Agent%40Dev_1@127.0.0.1:5432/chat_agents"
 _BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -50,7 +50,7 @@ def test_read_projection_repairs_dangling_tool_call_from_postgres() -> None:
         except Exception as exc:  # pragma: no cover - depends on local service
             raise AssertionError(
                 "PostgreSQL is required for integration tests. "
-                "Start it with `docker compose up -d postgres`."
+                "Start it with `docker compose up -d postgresql`."
             ) from exc
         with admin_engine.connect() as connection:
             connection.execute(text(f'CREATE DATABASE "{database_name}"'))
