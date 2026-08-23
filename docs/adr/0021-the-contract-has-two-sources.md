@@ -64,7 +64,7 @@ AG-UI 的 `ConfiguredBaseModel` 配了 `alias_generator=to_camel`，而 `EventEn
 2. **运行时契约测试**(Schemathesis 4.24.3，支持 3.1、可 pytest 集成）—— 管「后端违反自己的契约」，即响应体与声明的模型不符。**只打非流式 REST 面**，在 CI 里打本地起的服务 + 真 Postgres(#9 已定测试要真库）,**不打中转站**。
 3. **手写的载荷断言** —— 三个 `Custom` 的 `value` 逐字段断言，含上面那条命名法断言。这是唯一必须手写的一层，因为 AG-UI 不约束 `value`。
 
-注意与**三协议契约测试**区分：那个打真实中转站、断言形状不断言标识([ADR-0016](./0016-the-model-list-is-discovered-and-persisted.md) 已警告清单会漂移）,`llm/` 对全项目零依赖([ADR-0007](./0007-backend-is-split-by-capability-not-by-layer.md))正是为了它能独立跑。**本 ADR 管的是「我们的 API 对前端的契约」，不是「上游对我们的契约」**，两者容易混为一谈。
+注意与**三协议契约测试**区分：那个打真实中转站、断言形状不断言标识([ADR-0016](./0016-the-model-list-is-discovered-and-persisted.md) 已警告清单会漂移）,`llm/` 不认识任何能力模块([ADR-0007](./0007-backend-is-split-by-capability-not-by-layer.md))正是为了它能独立跑。**本 ADR 管的是「我们的 API 对前端的契约」，不是「上游对我们的契约」**，两者容易混为一谈。
 
 ## 后果
 

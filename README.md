@@ -134,8 +134,6 @@ graph TD
 
 模块内四层：`router.py`（HTTP ↔ 领域类型，不含业务）→ `service.py`（规则、编排、事务边界）→ `repository.py`（查询，不含规则、不开事务）→ `models.py`（ORM）。
 
-> 📌 `docs/adr/0007` 里那段依赖方向的文字与当前实现有出入（它写 `agent/ ─→ conversation`，实际方向相反）。上图以代码为准，偏差已单独记录，不在文档变更里顺手改代码或改决策。
-
 ### 三重包装
 
 一次运行的事件流从内到外穿过三层，每层职责单一、失败语义各不相同。这段形状逐字取自 `backend/src/chat_agents/main.py`：

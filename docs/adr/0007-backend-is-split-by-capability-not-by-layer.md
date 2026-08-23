@@ -24,18 +24,31 @@ backend/src/chat_agents/
 
 `api/` + `services/` + `repositories/` 是更常见的起手式，但它在这个项目里有一处硬伤：[ADR-0002](./0002-business-and-observability-share-a-database.md) 要求业务模块不得 import 观测模块，而**那是一条模块边界，不是层边界**。按技术层切，`services/` 里同时住着会话服务与跨度写入器、`repositories/` 里同时住着消息表与跨度表——这条纪律在目录上完全看不见，只能靠 code review 盯。按能力切，它退化成一条 import 规则，CI 可强制。
 
-依赖方向因此是单向的：
+依赖方向因此是单向的。下表列的是**能力模块之间实际存在的直接 import 边**（非传递可达）；括号里概括该模块另外还依赖的持久化与共享叶子，不逐一列举。
 
 ```
-llm/            零依赖
-tools/          零依赖
-conversation/  ─→ llm            （只为 ModelMessage 类型）
-agent/         ─→ llm, tools, conversation
-observability/ ─→ agent, conversation, llm      ← ADR-0002 允许的方向
-main.py        ─→ 全部
+llm/            ─→ （共享叶子）
+tools/          ─→ （共享叶子）
+agent/          ─→ llm, tools            （db, 共享叶子）
+conversation/   ─→ agent, llm            （db, database, 共享叶子）
+                                          ↑ agent/events 的领域事件类型
+observability/  ─→ agent, llm            （db, database）
+                    ↑ ADR-0002 允许的方向
+main.py         ─→ 除 tools 外的全部     （tools 经 agent 传递可达）
+                                          外加 database 与若干共享叶子
 ```
 
-`llm/` 对整个项目零依赖，因此三协议契约测试可以完全独立跑，不需要数据库、不需要 FastAPI。
+括号里两类都不是能力模块，不参与本节要约束的那条纪律：`db/` 与 `database.py` 是持久化基础设施；共享叶子指 `validation.py` / `token_estimation.py` / `model_catalog.py` / `exceptions.py` 这类无业务的工具模块。
+
+`transport/`（ADR-0009 定的 AG-UI 编码层）与 `eval_summary/` 是后于本 ADR 加入的边界模块，方向同为向内：`transport/ ─→ agent, llm`，`eval_summary/ ─→ llm`。
+
+要保住的性质不是"零依赖"这个字面，而是：**`llm/` 不认识 agent / conversation / observability / tools**。因此三协议契约测试可以完全独立跑，不需要数据库、不需要 FastAPI。`tools/` 同理。
+
+`conversation/ ─→ agent` 的内容是 `conversation/streaming.py` 里的 `persist()` 消费 `agent/events` 的领域事件类型。这与三重包装的形状一致——`persist` 本来就包在 `runner.run` 外面，外层认识内层发出的事件类型是自然的。
+
+> **本节已按实测更正（[#78](https://github.com/EllisYuan/ChatAgents/issues/78)）。** 原文写于实现之前，四处与代码不符：`agent/ ─→ conversation` 方向相反、`observability/ ─→ conversation` 这条边不存在、`llm/` 与 `tools/` 各有共享叶子依赖、`main.py` 不直接 import `tools`。
+>
+> **选择更正 ADR 而非改代码。** 这段文字要保证的架构性质——`llm/` 与观测的隔离——在当前实现下全部成立，四处偏差没有一处破坏它。唯一像漂移的 `conversation/ ─→ agent`，要反转就得先决定 `agent/events` 里那些事件类型归谁，而它们本就是 `agent/` 的产出；为对齐一段陈述而搬迁领域类型，是让代码迁就文档。
 
 模块名 `llm/` 而非 `models/` 是刻意的：`models` 在 Python web 生态里约定俗成指 ORM，占用它会让每个新读者误解一次；而 `llm/` 一眼说明这个项目是什么。ORM 因此保住 `<module>/models.py` 这个业界通行的位置。
 

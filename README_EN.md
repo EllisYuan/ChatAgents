@@ -134,8 +134,6 @@ Three properties worth calling out:
 
 Within a module there are four layers: `router.py` (HTTP ↔ domain types, no business logic) → `service.py` (rules, orchestration, transaction boundaries) → `repository.py` (queries, no rules, opens no transactions) → `models.py` (ORM).
 
-> 📌 The dependency-direction paragraph in `docs/adr/0007` disagrees with the current implementation (it states `agent/ ─→ conversation`; the real edge runs the other way). The diagram above follows the code. The discrepancy is tracked separately — a documentation change is not the place to quietly rewrite either the code or the decision.
-
 ### The triple wrapping
 
 A run's event stream passes through three layers from the inside out, each with a single responsibility and a distinct failure semantic. This shape is taken verbatim from `backend/src/chat_agents/main.py`:
