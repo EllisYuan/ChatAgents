@@ -22,8 +22,6 @@ A conversational agent that can search the web — but what it actually sets out
 
 There is exactly one surface. Run details grow in place underneath each answer — not a drawer, not a sidebar, not an "engineer mode" toggle. A casual visitor sees one line, `▸ 2 steps · 1.8k tok · 3.1s`; a technical reader expands it and walks all the way down to the span tree, the tool result cards, and the prompt version this particular run used. That trade-off is recorded in [ADR-0028](./docs/adr/0028-the-chat-surface-is-the-only-console.md).
 
-> This repository keeps its full git history: it started as a Streamlit + LangGraph demo and is now what this document describes. "Evolving from a demo into engineering-grade" is itself part of the portfolio.
-
 ## Three things that are actually different
 
 Every agent project claims "multi-model support, tracing, and evals." The three below are things this project does that most others do not, and each points at something verifiable in the repository.

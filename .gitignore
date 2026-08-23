@@ -57,3 +57,15 @@ htmlcov/
 # 临时文件
 *.tmp
 *.bak
+
+# Agent 工作草稿
+.scratch/
+
+# MCP 本地配置（含数据库凭据，勿入库）
+.mcp.json
+
+# Cygwin / Git Bash 崩溃转储
+*.stackdump
+
+# 执行计划（本地规划草稿）
+docs/execution-plan.md
