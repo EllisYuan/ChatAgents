@@ -69,3 +69,7 @@ htmlcov/
 
 # 执行计划（本地规划草稿）
 docs/execution-plan.md
+
+# Claude Code 本地状态（共享规则与 hooks 仍入库）
+.claude/settings.local.json
+.claude/worktrees/

@@ -114,8 +114,16 @@ def docs() -> None:
     run(["bash", "scripts/check-readme-ci-commands.sh"])
 
 
+def guards() -> None:
+    """检查器自身的反向测试——主动注入违规，确认每道门禁真的会红（ADR-0034）。"""
+
+    run(["bash", "scripts/test-import-contracts.sh"])
+    run(["bash", "scripts/test-check-docs-drift.sh"])
+    run(["bash", "scripts/test-block-dangerous-hook.sh"])
+
+
 def check() -> None:
-    for task in (test, contract, lint, typecheck, build, docs):
+    for task in (test, contract, lint, typecheck, build, docs, guards):
         task()
 
 
@@ -130,6 +138,7 @@ TASKS = {
     "typecheck": typecheck,
     "build": build,
     "docs": docs,
+    "guards": guards,
     "check": check,
 }
 

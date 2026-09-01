@@ -74,34 +74,19 @@
 
 后端按**能力**切，不按技术层切（[ADR-0007](./docs/adr/0007-backend-is-split-by-capability-not-by-layer.md)）。判据是可测试性：`api/ + services/ + repositories/` 那种切法会让「业务模块不得依赖观测模块」这条纪律在目录上完全看不见，只能靠 code review 盯；按能力切之后它退化成一条 import 规则。
 
-下图画的是**代码里实际存在的直接 import 边**：
+下图由 Python AST 生成，画的是**能力与边界包之间实际存在的直接 import 边**；装配入口和共享单文件叶子省略：
 
+<!-- generated: import-graph -->
 ```mermaid
 graph TD
-    main["main.py<br/>FastAPI 装配 · 三重包装组装处"]
-
-    subgraph caps["五个能力模块"]
-        conv["conversation/<br/>会话 · 消息 · 输入序列重建 · 观察掩蔽"]
-        agent["agent/<br/>ReAct Loop · 工具执行器 · 提示词与工具集版本"]
-        obs["observability/<br/>跨度写入 · trace 查询 · 用量聚合"]
-        llm["llm/<br/>端点档案 · ModelPort · 三协议适配器 · 模型发现 · 回放"]
-        tools["tools/<br/>web_search · web_reader"]
-    end
-
-    subgraph edge["边界与共享叶子"]
-        transport["transport/<br/>AG-UI over SSE 编码"]
-        evals["eval_summary/<br/>站点评测展示面"]
-        db["db/ · database.py<br/>ORM · app 与 obs 两个 schema"]
-        leaf["token_estimation.py · validation.py<br/>error_codes.py · exceptions.py · model_catalog.py"]
-    end
-
-    main --> conv
-    main --> agent
-    main --> obs
-    main --> llm
-    main --> transport
-    main --> evals
-    main --> db
+    conv["conversation/<br/>会话 · 消息 · 输入投影"]
+    agent["agent/<br/>ReAct Loop · 工具执行器 · 运行配置"]
+    llm["llm/<br/>ModelPort · 三协议适配 · 模型发现"]
+    tools["tools/<br/>web_search · web_reader"]
+    obs["observability/<br/>run/span · Trace · 用量聚合"]
+    transport["transport/<br/>AG-UI over SSE 编码"]
+    evals["eval_summary/<br/>站点评测展示面"]
+    db["db/<br/>app / obs ORM"]
 
     conv --> agent
     conv --> llm
@@ -116,13 +101,8 @@ graph TD
     transport --> llm
     evals --> llm
     db --> llm
-
-    llm --> leaf
-    tools --> leaf
-    conv --> leaf
-    agent --> leaf
-    transport --> leaf
 ```
+<!-- /generated: import-graph -->
 
 三条值得单独指出来的性质：
 
@@ -539,6 +519,12 @@ uv run --project backend pytest backend/tests/contract_test.py -m contract --max
 uv run --project backend ruff check --config=backend/pyproject.toml backend
 uv run --project backend ruff format --check --config=backend/pyproject.toml backend
 uv run --project backend mypy --config-file=backend/pyproject.toml backend
+uv run --project backend lint-imports --config backend/pyproject.toml --no-cache
+bash scripts/test-import-contracts.sh
+uv run --project backend python scripts/check-docs-drift.py
+bash scripts/test-check-docs-drift.sh
+bash scripts/check-readme-ci-commands.sh
+bash scripts/test-block-dangerous-hook.sh
 ```
 
 前端（在 `frontend/` 下执行）：
@@ -601,34 +587,56 @@ uv run --project backend pytest -m eval backend/tests/evals
 
 ## 目录结构
 
-```
+<!-- generated: repository-tree -->
+```text
 ChatAgents/
 ├── backend/
 │   ├── src/chat_agents/
 │   │   ├── main.py              # FastAPI 装配 · 三重包装唯一组装处
-│   │   ├── conversation/        # 会话 · 消息 · 输入序列重建 · 观察掩蔽
-│   │   ├── agent/               # ReAct Loop · 工具执行器 · 版本化
-│   │   ├── llm/                 # ModelPort · 三协议适配器 · 发现 · 回放
+│   │   ├── conversation/        # 会话 · 消息 · 输入投影
+│   │   ├── agent/               # ReAct Loop · 工具执行器 · 运行配置
+│   │   ├── llm/                 # ModelPort · 三协议适配 · 模型发现
 │   │   ├── tools/               # web_search · web_reader
-│   │   ├── observability/       # 跨度写入 · trace 查询 · 用量聚合
+│   │   ├── observability/       # run/span · Trace · 用量聚合
 │   │   ├── transport/           # AG-UI over SSE 编码
 │   │   ├── eval_summary/        # 站点评测展示面
-│   │   ├── db/                  # ORM：app 与 obs 两个 schema
-│   │   └── token_estimation.py  # 全项目唯一的 token 估算器
-│   ├── alembic/                 # 迁移（只增不改）
-│   ├── config/endpoints.yaml    # 端点档案
-│   └── tests/
-│       ├── evals/               # 评测（marker 隔离，不随默认测试跑）
-│       └── integration/         # 打真 PostgreSQL
-├── frontend/                    # React 19 + Vite + TanStack Query + Zustand
-│   └── src/features/            # session · sessions · trace · evals
-├── deploy/nginx/site.conf       # 应用属性那半份 nginx 配置
-├── docs/adr/                    # 33 份架构决策记录
-├── scripts/deploy.sh            # 发布 / 回滚
-├── compose.yaml                 # 本地
-├── compose.prod.yaml            # 线上叠加（换成 ghcr.io 镜像）
-└── CONTEXT.md                   # 术语表：只定义术语是什么
+│   │   └── db/                  # app / obs ORM
+│   ├── alembic/                 # 加性数据库迁移
+│   ├── config/endpoints.yaml     # 端点档案
+│   └── tests/                    # unit · contract · replay · integration · eval
+├── frontend/                     # React 19 · Vite · TanStack Query · Zustand
+├── .claude/rules/                # 按路径渐进加载的 Agent 约束
+├── docs/adr/                     # 34 份架构决策记录
+├── scripts/dev.py               # 跨平台 setup · test · lint · check
+├── scripts/check-docs-drift.py  # README 派生内容防腐
+├── Makefile                      # Unix 环境的薄封装
+├── PROGRESS.md                   # 跨会话执行状态
+└── CONTEXT.md                    # 统一语言，只定义术语是什么
 ```
+<!-- /generated: repository-tree -->
+
+
+## Agent Harness
+
+仓库本身是 Agent 的 **system of record**：跨会话仍需知道的知识必须进入版本控制，而不是停留在聊天记录或个人记忆中。入口采用渐进式披露，不把所有规则塞进一个常驻文件：
+
+| 层级 | 工件 | 加载方式 |
+|---|---|---|
+| 地图 | `CLAUDE.md` | 每次会话只加载项目入口、跨平台标准命令和文档指针 |
+| 统一语言 | `CONTEXT.md` | 涉及领域命名时读取 |
+| 局部约束 | `.claude/rules/*.md` | 命中对应模块路径时自动加载 |
+| 模块知识 | `*/ARCHITECTURE.md` | 与代码共置，说明职责、边界和不变量 |
+| 决策理由 | `docs/adr/` | 只按当前变更涉及的决定继续读取 |
+| 执行状态 | `PROGRESS.md` | 新会话恢复当前进展与阻塞 |
+
+文档不是约束的最终执行者。能够从仓库事实推导的规则都下沉为 **architecture fitness functions**：
+
+- Import Linter 守护共享叶子、观测单向依赖和顶层包无环；
+- `check-docs-drift.py` 从 Python AST 与文件系统生成依赖图、目录树和 ADR 计数；
+- `check-readme-ci-commands.sh` 断言 README 命令逐字存在于 CI；
+- 每个检查器都有主动注入违规的反向测试，并在 pre-commit 与 CI 两层执行。
+
+因此 `CLAUDE.md` 保持为地图，细节按路径披露；会腐化的派生事实交给脚本，而不是靠 Agent 记住同步更新。
 
 ## 契约
 
@@ -716,12 +724,17 @@ docker compose logs postgresql --tail 100 -f
 
 ## 文档
 
+<!-- generated: docs-table -->
 | 文件 | 内容 |
 |---|---|
+| [`CLAUDE.md`](./CLAUDE.md) | Agent 入口地图、标准命令与全局不变量 |
 | [`CONTEXT.md`](./CONTEXT.md) | 术语表——只定义术语**是什么**，不记录实现方式 |
-| [`docs/adr/`](./docs/adr/) | 33 份架构决策记录，含被否决方案与理由 |
+| [`PROGRESS.md`](./PROGRESS.md) | 跨会话执行状态、后续事项与阻塞 |
+| [`docs/adr/`](./docs/adr/) | 34 份架构决策记录，含被否决方案与理由 |
+| `backend/src/chat_agents/*/ARCHITECTURE.md` | 与能力模块共置的职责、边界和不变量 |
 | [`docs/research/`](./docs/research/) | 选型阶段的调研报告 |
 | [`frontend/src/features/trace/SPEC.md`](./frontend/src/features/trace/SPEC.md) | 跨度树的客户端合并规则 |
+<!-- /generated: docs-table -->
 
 几份值得先读的 ADR：
 

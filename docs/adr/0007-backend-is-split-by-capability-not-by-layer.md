@@ -22,7 +22,7 @@ backend/src/chat_agents/
 
 ## 为什么不按技术层切
 
-`api/` + `services/` + `repositories/` 是更常见的起手式，但它在这个项目里有一处硬伤：[ADR-0002](./0002-business-and-observability-share-a-database.md) 要求业务模块不得 import 观测模块，而**那是一条模块边界，不是层边界**。按技术层切，`services/` 里同时住着会话服务与跨度写入器、`repositories/` 里同时住着消息表与跨度表——这条纪律在目录上完全看不见，只能靠 code review 盯。按能力切，它退化成一条 import 规则，CI 可强制。
+`api/` + `services/` + `repositories/` 是更常见的起手式，但它在这个项目里有一处硬伤：[ADR-0002](./0002-business-and-observability-share-a-database.md) 要求业务模块不得 import 观测模块，而**那是一条模块边界，不是层边界**。按技术层切，`services/` 里同时住着会话服务与跨度写入器、`repositories/` 里同时住着消息表与跨度表——这条纪律在目录上完全看不见，只能靠 code review 盯。按能力切，它退化成一条 import 规则，CI 可强制——这条依赖方向如今由 Import Linter 在 pre-commit 与 CI 两处执行（[ADR-0034](./0034-invariants-are-enforced-not-documented.md)），不再依赖本文件被读到。
 
 依赖方向因此是单向的。下表列的是**能力模块之间实际存在的直接 import 边**（非传递可达）；括号里概括该模块另外还依赖的持久化与共享叶子，不逐一列举。
 

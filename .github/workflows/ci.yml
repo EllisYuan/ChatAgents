@@ -55,6 +55,18 @@ jobs:
         run: uv run --project backend ruff format --check --config=backend/pyproject.toml backend
       - name: Run mypy
         run: uv run --project backend mypy --config-file=backend/pyproject.toml backend
+      - name: Enforce import contracts
+        run: uv run --project backend lint-imports --config backend/pyproject.toml --no-cache
+      - name: Prove import contract guard
+        run: bash scripts/test-import-contracts.sh
+      - name: Check README derived blocks
+        run: uv run --project backend python scripts/check-docs-drift.py
+      - name: Prove docs drift guard
+        run: bash scripts/test-check-docs-drift.sh
+      - name: Check README CI commands
+        run: bash scripts/check-readme-ci-commands.sh
+      - name: Prove dangerous-command hook
+        run: bash scripts/test-block-dangerous-hook.sh
 
   eval-trigger:
     name: Detect model-input changes

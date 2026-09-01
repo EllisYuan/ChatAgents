@@ -8,3 +8,20 @@ repos:
       - id: ruff-format
         args: [--config=backend/pyproject.toml]
         files: ^backend/
+
+  # 本地钩子：跑仓库自己的适应度函数（ADR-0034）。用 language: system 而不是
+  # 拉远端 repo——它们校验的是本仓库事实，没有可复用的上游实现。
+  - repo: local
+    hooks:
+      - id: import-contracts
+        name: Import Linter（架构边界）
+        entry: uv run --project backend lint-imports --config backend/pyproject.toml --no-cache
+        language: system
+        pass_filenames: false
+        files: ^backend/src/
+      - id: docs-drift
+        name: README 派生区块防腐
+        entry: uv run --project backend python scripts/check-docs-drift.py
+        language: system
+        pass_filenames: false
+        files: ^(README\.md|backend/src/chat_agents/|docs/adr/|scripts/check-docs-drift\.py)

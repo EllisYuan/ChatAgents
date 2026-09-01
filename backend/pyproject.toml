@@ -44,6 +44,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "import-linter>=2.7.0",
     "jsonschema>=4.26.0",
     "mypy>=1.13.0",
     "pre-commit>=4.6.2",
@@ -95,4 +96,59 @@ markers = [
     "upstream: calls a live upstream service; excluded from the default test run",
     "db: requires a running PostgreSQL database",
     "contract: in-process OpenAPI contract gate",
+]
+
+
+[tool.importlinter]
+root_package = "chat_agents"
+
+[[tool.importlinter.contracts]]
+# ADR-0007：llm/ 是共享叶子——三协议契约测试要能在零数据库、零 FastAPI 下跑。
+name = "LLM 模块保持为共享叶子"
+type = "forbidden"
+source_modules = ["chat_agents.llm"]
+forbidden_modules = [
+    "chat_agents.agent",
+    "chat_agents.conversation",
+    "chat_agents.observability",
+    "chat_agents.tools",
+    "chat_agents.transport",
+]
+
+[[tool.importlinter.contracts]]
+# tools/ 只通过 ToolExecutionContext 的结构接口拿运行内依赖，不认识具体实现。
+name = "Tools 模块保持为共享叶子"
+type = "forbidden"
+source_modules = ["chat_agents.tools"]
+forbidden_modules = [
+    "chat_agents.agent",
+    "chat_agents.conversation",
+    "chat_agents.llm",
+    "chat_agents.observability",
+    "chat_agents.transport",
+]
+
+[[tool.importlinter.contracts]]
+# 观测可丢、业务不可丢：业务一旦反向依赖观测，「观测写失败不影响业务」就作废了。
+name = "业务与边界模块不得反向依赖观测实现"
+type = "forbidden"
+source_modules = [
+    "chat_agents.agent",
+    "chat_agents.conversation",
+    "chat_agents.llm",
+    "chat_agents.tools",
+    "chat_agents.transport",
+]
+forbidden_modules = ["chat_agents.observability"]
+
+[[tool.importlinter.contracts]]
+# 分层而非互相独立：conversation/transport 读 agent 的领域事件是设计（外层包装
+# 内层），反向才是环。layers 只禁反向边，正向边照常放行。
+name = "顶层包之间不得形成依赖环"
+type = "layers"
+layers = [
+    "chat_agents.observability",
+    "chat_agents.transport",
+    "chat_agents.conversation",
+    "chat_agents.agent",
 ]
