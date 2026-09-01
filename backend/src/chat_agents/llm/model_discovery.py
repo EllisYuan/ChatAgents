@@ -28,6 +28,10 @@ from .server_config import ServerEndpointsConfig, build_available_profiles
 MODEL_DISCOVERY_TIMEOUT_SECONDS = 5.0
 MODEL_DISCOVERY_INTERVAL_SECONDS = 24 * 60 * 60
 MODEL_DISCOVERY_ENABLED_ENV = "CHATAGENTS_MODEL_DISCOVERY_ENABLED"
+# Anthropic 要求每个请求都带这个头；官方 SDK 自己会带，清单请求是自己发的 HTTP。
+ANTHROPIC_VERSION = "2023-06-01"
+# 上游没给分组标签时的占位——只影响选单分组，不进模型标识。
+UNKNOWN_OWNER = "unknown"
 
 logger = logging.getLogger(__name__)
 
@@ -75,17 +79,45 @@ def _parse_models(payload: Any) -> tuple[ModelItem, ...]:
             model_id = validate_model_identifier(model_id)
         except ValueError as exc:
             raise ValueError(f"模型清单 data[{index}] 的 id 不合法：{exc}") from exc
-        if not isinstance(owned_by, str):
-            raise ValueError(f"模型清单 data[{index}] 缺少字符串 owned_by")
-        try:
-            validate_non_blank(owned_by, field="owned_by", max_length=256)
-        except ValueError as exc:
-            raise ValueError(f"模型清单 data[{index}] 的 owned_by 不合法：{exc}") from exc
+        # owned_by 只是选单的分组标签（前端 ModelPicker 按它分桶），不是标识的一部分。
+        # Anthropic 官方 /v1/models 整个响应都没有这个字段（2026-09-01 实测），
+        # 缺了就整份清单作废是拿一个显示细节否掉全部可寻址模型——按未知分组收下。
+        if owned_by is None:
+            owned_by = UNKNOWN_OWNER
+        elif not isinstance(owned_by, str):
+            raise ValueError(f"模型清单 data[{index}] 的 owned_by 必须是字符串")
+        else:
+            try:
+                validate_non_blank(owned_by, field="owned_by", max_length=256)
+            except ValueError as exc:
+                raise ValueError(f"模型清单 data[{index}] 的 owned_by 不合法：{exc}") from exc
         if model_id in seen:
             continue
         seen.add(model_id)
         result.append(ModelItem(model_id=model_id, owned_by=owned_by))
     return tuple(result)
+
+
+def _discovery_headers(profile: EndpointProfile) -> dict[str, str]:
+    """清单请求的鉴权头。
+
+    生成路径由官方 SDK 构造请求，这两件事 SDK 替我们做了；清单请求是自己发的
+    HTTP，得自己补上（2026-09-01 实测，两处缺失各让一个官方端点 4xx）：
+
+    - ``Authorization`` 要带 ``Bearer `` 前缀，否则 OpenAI 401；
+    - Anthropic 要求 ``anthropic-version``，缺了就 400。
+
+    档案自定义的鉴权头字段名照原样使用——``auth_field`` 是端点档案的属性
+    （ADR-0014），中转站可能约定别的头名，这里不替它做判断。
+    """
+
+    secret = profile.api_key.get_secret_value()
+    if profile.auth_field.lower() == "authorization" and not secret.lower().startswith("bearer "):
+        secret = f"Bearer {secret}"
+    headers = {profile.auth_field: secret}
+    if profile.protocol == "anthropic_messages":
+        headers["anthropic-version"] = ANTHROPIC_VERSION
+    return headers
 
 
 async def _get_models(
@@ -94,7 +126,7 @@ async def _get_models(
     http_client: ModelsHttpClient | None,
     timeout: float,  # noqa: ASYNC109 - forwarded to the HTTP client's total timeout
 ) -> tuple[ModelItem, ...]:
-    headers = {profile.auth_field: profile.api_key.get_secret_value()}
+    headers = _discovery_headers(profile)
     url = models_url(profile.base_url)
 
     if http_client is not None:

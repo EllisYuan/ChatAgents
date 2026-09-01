@@ -5,10 +5,13 @@ from chat_agents.llm.effort import EFFORT_TIERS, apply_effort, apply_summary_fla
 
 
 @pytest.mark.parametrize("effort", EFFORT_TIERS)
-def test_anthropic_effort_goes_under_thinking(effort: str) -> None:
+def test_anthropic_effort_goes_under_output_config(effort: str) -> None:
+    """挂 ``output_config`` 而不是 ``thinking``——后者会被上游以
+    ``thinking.adaptive.effort: Extra inputs are not permitted`` 拒掉。"""
+
     payload: dict = {}
     apply_effort("anthropic_messages", payload, effort)
-    assert payload == {"thinking": {"effort": effort}}
+    assert payload == {"output_config": {"effort": effort}}
 
 
 @pytest.mark.parametrize("effort", EFFORT_TIERS)
@@ -25,16 +28,26 @@ def test_openai_chat_completions_effort_is_top_level(effort: str) -> None:
     assert payload == {"reasoning_effort": effort}
 
 
-def test_apply_effort_merges_into_existing_thinking_key() -> None:
-    payload: dict = {"thinking": {"budget_tokens": 1600}}
+def test_apply_effort_merges_into_existing_output_config_key() -> None:
+    payload: dict = {"output_config": {"format": {"type": "text"}}}
     apply_effort("anthropic_messages", payload, "high")
-    assert payload == {"thinking": {"budget_tokens": 1600, "effort": "high"}}
+    assert payload == {"output_config": {"format": {"type": "text"}, "effort": "high"}}
 
 
-def test_anthropic_summary_flag_sets_display_summarized() -> None:
+def test_anthropic_effort_does_not_touch_thinking() -> None:
+    """努力档位与思考模式是两条独立的参数路径，别把档位写进 thinking。"""
+
+    payload: dict = {}
+    apply_effort("anthropic_messages", payload, "high")
+    assert "thinking" not in payload
+
+
+def test_anthropic_summary_flag_enables_adaptive_thinking_with_summary() -> None:
+    """4.6+ 模型上自适应是唯一的开启方式；``display`` 决定摘要是否回传。"""
+
     payload: dict = {}
     apply_summary_flag("anthropic_messages", payload)
-    assert payload == {"thinking": {"display": "summarized"}}
+    assert payload == {"thinking": {"type": "adaptive", "display": "summarized"}}
 
 
 def test_openai_responses_summary_flag_sets_reasoning_summary_auto() -> None:

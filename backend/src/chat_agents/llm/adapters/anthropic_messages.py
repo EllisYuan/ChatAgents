@@ -31,7 +31,7 @@ from ..events import (
 )
 from ..message import ModelMessage, OpaqueBlock, TextBlock, ToolCallBlock, ToolResultBlock
 from ..profile import EndpointProfile
-from ..tool_schema import to_protocol_tools
+from ..tool_schema import ToolLike, to_protocol_tools
 
 _DEFAULT_MAX_TOKENS = 8192
 
@@ -67,7 +67,7 @@ def _serialize_message(message: ModelMessage) -> dict[str, Any]:
 def build_request(
     *,
     messages: Sequence[ModelMessage],
-    tools: Sequence[Any],
+    tools: Sequence[ToolLike],
     model: str,
     effort: EffortTier,
     system_prompt: str | None = None,
@@ -233,7 +233,7 @@ class AnthropicMessagesAdapter:
         self,
         *,
         messages: Sequence[ModelMessage],
-        tools: Sequence[Any],
+        tools: Sequence[ToolLike],
         model: str,
         effort: EffortTier,
         profile: EndpointProfile,

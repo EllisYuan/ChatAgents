@@ -6,8 +6,10 @@ from typing import Any
 
 import pytest
 from chat_agents.llm.model_discovery import (
+    ANTHROPIC_VERSION,
     MODEL_DISCOVERY_INTERVAL_SECONDS,
     MODEL_DISCOVERY_TIMEOUT_SECONDS,
+    UNKNOWN_OWNER,
     InMemoryModelCatalogStore,
     ModelDiscoveryError,
     ModelDiscoveryService,
@@ -69,6 +71,64 @@ def profile(name: str = "preset") -> EndpointProfile:
     )
 
 
+def test_bearer_prefix_is_added_when_the_key_lacks_it() -> None:
+    """裸密钥要补 ``Bearer `` ——官方 OpenAI 端点缺前缀直接 401（2026-09-01 实测）。
+
+    生成路径由官方 SDK 构造请求、SDK 自己补前缀；清单请求是自己发的 HTTP，
+    这一步没人替我们做。
+    """
+
+    async def scenario() -> None:
+        bare = EndpointProfile(
+            name="preset",
+            protocol="openai_responses",
+            base_url="https://api.openai.com/v1",
+            auth_field="Authorization",
+            api_key=SecretStr("sk-no-prefix"),
+        )
+        client = FakeHttpClient(FakeResponse({"data": []}))
+
+        await discover_openai_models(bare, http_client=client)
+
+        assert client.calls[0]["headers"] == {"Authorization": "Bearer sk-no-prefix"}
+
+    asyncio.run(scenario())
+
+
+def test_bearer_prefix_is_not_doubled() -> None:
+    async def scenario() -> None:
+        client = FakeHttpClient(FakeResponse({"data": []}))
+
+        await discover_openai_models(profile(), http_client=client)
+
+        assert client.calls[0]["headers"] == {"Authorization": "Bearer test-key"}
+
+    asyncio.run(scenario())
+
+
+def test_anthropic_profile_carries_the_required_version_header() -> None:
+    """Anthropic 缺 ``anthropic-version`` 直接 400（2026-09-01 实测官方端点）。"""
+
+    async def scenario() -> None:
+        anthropic = EndpointProfile(
+            name="anthropic-official",
+            protocol="anthropic_messages",
+            base_url="https://api.anthropic.com",
+            auth_field="x-api-key",
+            api_key=SecretStr("sk-ant-key"),
+        )
+        client = FakeHttpClient(FakeResponse({"data": []}))
+
+        await discover_openai_models(anthropic, http_client=client)
+
+        assert client.calls[0]["headers"] == {
+            "x-api-key": "sk-ant-key",
+            "anthropic-version": ANTHROPIC_VERSION,
+        }
+
+    asyncio.run(scenario())
+
+
 def test_models_url_supports_bases_with_or_without_v1_suffix() -> None:
     assert models_url("https://relay.example.com") == "https://relay.example.com/v1/models"
     assert models_url("https://relay.example.com/v1/") == "https://relay.example.com/v1/models"
@@ -107,10 +167,26 @@ def test_discovery_reads_only_openai_id_and_owned_by() -> None:
 
 def test_discovery_rejects_malformed_model_entries() -> None:
     async def scenario() -> None:
-        client = FakeHttpClient(FakeResponse({"data": [{"id": "missing-owner"}]}))
+        client = FakeHttpClient(FakeResponse({"data": [{"id": "bad-owner", "owned_by": 42}]}))
 
         with pytest.raises(ModelDiscoveryError, match="owned_by"):
             await discover_openai_models(profile(), http_client=client)
+
+    asyncio.run(scenario())
+
+
+def test_missing_owned_by_keeps_the_model_under_an_unknown_group() -> None:
+    """``owned_by`` 只是选单分组标签；Anthropic 官方清单整个没有这个字段。
+
+    缺一个显示细节不该让整份可寻址清单作废（2026-09-01 实测官方 /v1/models）。
+    """
+
+    async def scenario() -> None:
+        client = FakeHttpClient(FakeResponse({"data": [{"id": "claude-opus-5"}]}))
+
+        models = await discover_openai_models(profile(), http_client=client)
+
+        assert [(m.model_id, m.owned_by) for m in models] == [("claude-opus-5", UNKNOWN_OWNER)]
 
     asyncio.run(scenario())
 

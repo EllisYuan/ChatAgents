@@ -215,7 +215,9 @@ def test_request_payload_maps_tools_effort_and_summary_flag() -> None:
             "input_schema": {"type": "object", "properties": {}},
         }
     ]
-    assert kwargs["thinking"] == {"effort": "xhigh", "display": "summarized"}
+    # 档位挂 output_config，thinking 只管思考模式与摘要——两条独立的参数路径。
+    assert kwargs["output_config"] == {"effort": "xhigh"}
+    assert kwargs["thinking"] == {"type": "adaptive", "display": "summarized"}
 
 
 def test_interruption_after_message_start_reports_partial_usage() -> None:

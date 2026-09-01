@@ -5,7 +5,6 @@
 """
 
 from collections.abc import AsyncIterator, Sequence
-from typing import Any
 from typing import Protocol as TypingProtocol
 
 from anthropic import AsyncAnthropic
@@ -19,6 +18,7 @@ from .effort import EffortTier
 from .events import ModelEvent
 from .message import ModelMessage
 from .profile import EndpointProfile
+from .tool_schema import ToolLike
 
 _default_client_cache = HttpClientCache()
 
@@ -28,7 +28,7 @@ class ModelPort(TypingProtocol):
         self,
         *,
         messages: Sequence[ModelMessage],
-        tools: Sequence[Any],
+        tools: Sequence[ToolLike],
         model: str,
         effort: EffortTier,
         profile: EndpointProfile,
