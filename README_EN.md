@@ -355,9 +355,18 @@ cp .env.sample .env
 
 ```bash
 # Terminal 1: backend
-uv run --project backend python -m uvicorn chat_agents.main:app --app-dir backend/src --reload
+uv run --project backend python scripts/dev.py serve
 
 # Terminal 2: frontend
+uv run --project backend python scripts/dev.py web
+```
+
+These are equivalent to the two commands below. `--port 8080` is not optional —
+omitting it falls back to uvicorn's default 8000 while the frontend proxy still
+targets 8080, so every `/api` request gets an empty 500 minted by the proxy:
+
+```bash
+uv run --project backend python -m uvicorn chat_agents.main:app --app-dir backend/src --reload --port 8080
 npm --prefix frontend run dev
 ```
 
@@ -378,6 +387,15 @@ VITE_BACKEND_ORIGIN=http://127.0.0.1:19180 npm --prefix frontend run dev
 ## Configuration
 
 ### Environment variables
+
+Keys are read from **environment variables** only, never from `endpoints.yaml` —
+that file is committed and baked into the image, so it holds variable names
+(`auth_secret_ref`), not key values ([ADR-0032](./docs/adr/0032-app-config-lives-in-the-repo-machine-config-does-not.md)).
+
+The repo-root `.env` is loaded into `os.environ` when the backend package
+initializes, so no manual export is needed locally. Values already present in the
+environment win, so what compose and CI inject is never overwritten by the file;
+production images ship without one, making the load a no-op.
 
 | Variable | Description | Required |
 |---|---|---|

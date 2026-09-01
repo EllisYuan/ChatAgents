@@ -355,9 +355,17 @@ cp .env.sample .env
 
 ```bash
 # 终端 1：后端
-uv run --project backend python -m uvicorn chat_agents.main:app --app-dir backend/src --reload
+uv run --project backend python scripts/dev.py serve
 
 # 终端 2：前端
+uv run --project backend python scripts/dev.py web
+```
+
+两条命令分别等价于下面这两句；`--port 8080` 不能省——省掉会退到 uvicorn 默认的
+8000，而前端代理仍打 8080，届时每个 `/api` 请求都会收到代理自造的 500 空响应：
+
+```bash
+uv run --project backend python -m uvicorn chat_agents.main:app --app-dir backend/src --reload --port 8080
 npm --prefix frontend run dev
 ```
 
@@ -378,6 +386,13 @@ VITE_BACKEND_ORIGIN=http://127.0.0.1:19180 npm --prefix frontend run dev
 ## 配置
 
 ### 环境变量
+
+密钥只从**环境变量**读，不从 `endpoints.yaml` 读——那份文件进 git、烘进镜像，
+只存变量名（`auth_secret_ref`），不存密钥值（[ADR-0032](./docs/adr/0032-app-config-lives-in-the-repo-machine-config-does-not.md)）。
+
+仓库根的 `.env` 会在后端包初始化时读进 `os.environ`，本地无需手工 export；
+已经在环境里的值优先，compose 与 CI 注入的不会被文件覆盖，生产镜像内没有这份
+文件，此加载是空操作。
 
 | 变量 | 说明 | 必需 |
 |---|---|---|

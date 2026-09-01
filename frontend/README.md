@@ -9,7 +9,9 @@ npm install
 npm run dev
 ```
 
-Vite 会把 `/api` 与 `/health` 代理到本地 FastAPI（默认 `http://127.0.0.1:8080`）。可以通过 `VITE_BACKEND_ORIGIN` 覆盖后端地址：
+Vite 会把 `/api` 与 `/health` 代理到本地 FastAPI（默认 `http://127.0.0.1:8080`）。**8080 是后端在四处配置里的统一端口**，后端用 `scripts/dev.py serve` 起就已经钉在这个端口上；两边不一致时代理会返回自造的 500 空响应，前端看到的是「获取会话列表失败：500」而不是后端的真实错误。
+
+只有把后端跑在别处（例如 compose 的宿主映射 19180）时才需要 `VITE_BACKEND_ORIGIN` 覆盖：
 
 ```bash
 VITE_BACKEND_ORIGIN=http://127.0.0.1:19180 npm run dev

@@ -1,11 +1,13 @@
 """Issue #63 的容器与 Compose 静态契约。"""
 
+import re
 from pathlib import Path
 from typing import Any, cast
 
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+BACKEND_PORT = "8080"
 
 
 class _ComposeLoader(yaml.SafeLoader):
@@ -98,6 +100,41 @@ def test_backend_image_is_uv_multistage_without_source_tree() -> None:
     assert "COPY --from=build /app/backend/.venv /app/.venv" in dockerfile
     assert "ARG APP_VERSION" in dockerfile
     assert 'ENV PATH="/app/.venv/bin:$PATH"' in dockerfile
+
+
+def test_backend_port_is_the_same_everywhere() -> None:
+    """8080 有四处定义，漂一处就断一条链路（ADR-0034：能机械验证的就别只写进文档）。
+
+    历史故障：README 的本地直起命令漏了 ``--port``，uvicorn 退回默认 8000，
+    而 vite 代理仍打 8080，前端每个 ``/api`` 请求收到代理自造的 500 空响应。
+    """
+
+    dockerfile = (REPO_ROOT / "backend/Dockerfile").read_text(encoding="utf-8")
+    vite_config = (REPO_ROOT / "frontend/vite.config.ts").read_text(encoding="utf-8")
+    dev_script = (REPO_ROOT / "scripts/dev.py").read_text(encoding="utf-8")
+    backend = _compose("compose.yaml")["services"]["backend"]
+
+    # 容器内监听端口，与 EXPOSE 一致
+    assert f"EXPOSE {BACKEND_PORT}" in dockerfile
+    assert f'"--port", "{BACKEND_PORT}"' in dockerfile
+
+    # compose 宿主映射的容器侧（宿主侧 19180 是机器属性，不在本断言范围内）
+    assert backend["ports"] == [f"127.0.0.1:19180:{BACKEND_PORT}"]
+    assert f"127.0.0.1:{BACKEND_PORT}/health" in " ".join(backend["healthcheck"]["test"])
+
+    # 本地直起：dev.py 是执行真源，vite 代理默认值必须指向同一个端口
+    assert f'BACKEND_PORT = "{BACKEND_PORT}"' in dev_script
+    assert "BACKEND_PORT," in dev_script
+    assert f'"http://127.0.0.1:{BACKEND_PORT}"' in vite_config
+
+
+def test_readme_backend_command_pins_the_port() -> None:
+    """README 的启动命令必须显式 ``--port``——不写就是 8000，这正是历史故障。"""
+
+    for name in ("README.md", "README_EN.md"):
+        text = (REPO_ROOT / name).read_text(encoding="utf-8")
+        for command in re.findall(r"^.*-m uvicorn chat_agents\.main:app.*$", text, re.MULTILINE):
+            assert f"--port {BACKEND_PORT}" in command, f"{name} 的启动命令缺少端口: {command}"
 
 
 def test_production_compose_uses_published_backend_image() -> None:

@@ -3,6 +3,27 @@ import type { components, paths } from "../generated/api";
 type ModelsResponse =
   paths["/api/models"]["get"]["responses"][200]["content"]["application/json"];
 
+/**
+ * 从失败响应里取一句可读的错误。
+ *
+ * 后端的失败带 RFC 9457 的 `ProblemDetails` 正文，但**不是每个 500 都来自后端**：
+ * dev 代理连不上后端、网关超时时正文是空的，无条件 `response.json()` 会抛
+ * 「Unexpected end of JSON input」，把真正的状态码盖掉。拿不到结构化正文时
+ * 回落到状态码本身。
+ */
+async function problemMessage(response: Response): Promise<string> {
+  try {
+    const problem = (await response.json()) as components["schemas"]["ProblemDetails"];
+    const detail = problem.detail || problem.title;
+    if (detail) {
+      return detail;
+    }
+  } catch {
+    // 正文不是 JSON——落到下面的状态码
+  }
+  return `请求失败：HTTP ${response.status}`;
+}
+
 /** 不传 `endpointProfile` 时读服务端 `default_profile`（issue #70：档案切换）。 */
 export async function getModels(endpointProfile?: string): Promise<ModelsResponse> {
   const query = new URLSearchParams();
@@ -43,8 +64,7 @@ export async function refreshModels(request: ModelRefreshRequest): Promise<Model
     body: JSON.stringify(request),
   });
   if (!response.ok) {
-    const problem = (await response.json()) as components["schemas"]["ProblemDetails"];
-    throw new Error(problem.detail || problem.title);
+    throw new Error(await problemMessage(response));
   }
   return (await response.json()) as ModelRefreshResponse;
 }

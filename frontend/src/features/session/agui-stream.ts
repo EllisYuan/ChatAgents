@@ -55,6 +55,27 @@ const TRACE_EVENT_TYPES = new Set([
 ]);
 
 /**
+ * 从失败响应里取一句可读的错误。
+ *
+ * 后端的失败带 RFC 9457 的 `ProblemDetails` 正文，但**不是每个 500 都来自后端**：
+ * dev 代理连不上后端、网关超时时正文是空的，无条件 `response.json()` 会抛
+ * 「Unexpected end of JSON input」，把真正的状态码盖掉——排查会被引向错误方向。
+ * 拿不到结构化正文时回落到状态码本身。
+ */
+async function problemMessage(response: Response): Promise<string> {
+  try {
+    const problem = (await response.json()) as ProblemDetails;
+    const detail = problem.detail || problem.title;
+    if (detail) {
+      return detail;
+    }
+  } catch {
+    // 正文不是 JSON——落到下面的状态码
+  }
+  return `请求失败：HTTP ${response.status}`;
+}
+
+/**
  * 发起一次运行并消费 AG-UI over SSE 的事件流（issue #65）。
  *
  * 自写而非 `eventsource` 包——后者含自动重连，断连会闷声重开一次运行、重复
@@ -74,8 +95,7 @@ export async function streamRun(
   });
 
   if (!response.ok) {
-    const problem = (await response.json()) as ProblemDetails;
-    throw new Error(problem.detail || problem.title);
+    throw new Error(await problemMessage(response));
   }
   if (!response.body) {
     throw new Error("响应没有可读的流");
