@@ -1,6 +1,8 @@
 import { useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 
 import { useSessionListStore } from "../../stores/session-list-store";
+import { uuidv7 } from "../../utils/uuid";
 import { SessionListItem } from "./SessionListItem";
 
 interface SessionSidebarProps {
@@ -20,14 +22,34 @@ export function SessionSidebar({ activeSessionId }: SessionSidebarProps) {
   const error = useSessionListStore((state) => state.error);
   const loadInitial = useSessionListStore((state) => state.loadInitial);
   const loadMore = useSessionListStore((state) => state.loadMore);
+  const navigate = useNavigate();
 
   useEffect(() => {
     void loadInitial();
   }, [loadInitial]);
 
+  /*
+    开新会话只是换一个路由标识——不调后端、不往列表里插行。会话随第一条
+    用户消息诞生（ADR-0013），空会话在后端根本不存在；这里提前建行会造出
+    一条永远不会有消息的幽灵。侧边栏的那一行由 `touchDraft` 在发送时补上。
+  */
+  const startNewSession = () => {
+    navigate(`/s/${uuidv7()}`);
+  };
+
   return (
     <nav className="session-sidebar" aria-label="会话列表">
-      <p className="eyebrow">SESSIONS</p>
+      <div className="session-sidebar-head">
+        <p className="eyebrow">SESSIONS</p>
+        <button
+          type="button"
+          className="session-sidebar-new"
+          onClick={startNewSession}
+          aria-label="开始新会话"
+        >
+          + 新会话
+        </button>
+      </div>
       {error && (
         <p className="session-sidebar-error" role="alert">
           {error}
@@ -48,6 +70,7 @@ export function SessionSidebar({ activeSessionId }: SessionSidebarProps) {
           type="button"
           onClick={() => void loadMore()}
           disabled={loadingMore}
+          data-busy={loadingMore}
         >
           {loadingMore ? "加载中…" : "加载更多"}
         </button>

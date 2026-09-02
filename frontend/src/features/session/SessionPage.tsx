@@ -5,6 +5,7 @@ import { TracePanel } from "../trace/TracePanel";
 import { useUiStore } from "../../stores/ui-store";
 import { AdvancedOptions } from "./AdvancedOptions";
 import { EffortSwitcher, type EffortTier } from "./EffortSwitcher";
+import { MessageMarkdown } from "./MessageMarkdown";
 import { useAgentRun } from "./useAgentRun";
 
 export function SessionPage() {
@@ -70,9 +71,20 @@ export function SessionPage() {
               {messages.map((message) => (
                 <li key={message.id} className={`chat-turn chat-turn--${message.role}`}>
                   <span className="chat-turn-role">{message.role === "user" ? "YOU" : "AGENT"}</span>
-                  <p className="chat-turn-text">
-                    {message.text || (message.id === streamingId ? "…" : "")}
-                  </p>
+                  {/*
+                    用户输入按原文保形（.chat-turn-text 的 pre-wrap），Agent 回答走
+                    Markdown 渲染——正文里的标题、列表、代码块与链接都是模型按
+                    Markdown 写出来的，直接当纯文本摆出来就是把 `##` 和 `**` 摊在脸上。
+                  */}
+                  {message.role === "assistant" ? (
+                    message.text ? (
+                      <MessageMarkdown text={message.text} />
+                    ) : (
+                      <p className="chat-turn-text">{message.id === streamingId ? "…" : ""}</p>
+                    )
+                  ) : (
+                    <p className="chat-turn-text">{message.text}</p>
+                  )}
                   {message.role === "assistant" && message.id === streamingId && activeTool && (
                     <p className="chat-tool-note">▸ 使用工具 {activeTool}</p>
                   )}
@@ -126,6 +138,7 @@ export function SessionPage() {
               className="composer-submit"
               type="submit"
               disabled={phase === "streaming" || !draft.trim()}
+              data-busy={phase === "streaming"}
             >
               {phase === "streaming" ? "运行中…" : "发送"}
               <span className="composer-key" aria-hidden="true">

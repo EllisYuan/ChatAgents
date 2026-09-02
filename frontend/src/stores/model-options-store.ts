@@ -46,6 +46,12 @@ interface ModelOptionsState {
   setMainModel: (value: string) => void;
   auxiliaryModel: string;
   setAuxiliaryModel: (value: string) => void;
+  /**
+   * auxiliary 是否还在跟随 main（ADR-0012：辅助模型绝大多数时候只做标题生成，
+   * 与主模型同源是常态）。用户一旦手动改过 auxiliary 就永久置 false——此后
+   * 再选主模型不会把他的选择冲掉。
+   */
+  auxiliaryFollowsMain: boolean;
 }
 
 export const useModelOptionsStore = create<ModelOptionsState>((set) => ({
@@ -64,7 +70,15 @@ export const useModelOptionsStore = create<ModelOptionsState>((set) => ({
     set({ customStatus: status, customErrorMessage: errorMessage }),
 
   mainModel: "",
-  setMainModel: (value) => set({ mainModel: value }),
+  // 跟随态下 auxiliary 与 main 同步落值，而不是留空后在读取处再兜底——
+  // 界面上那个框显示的就是真正会用的标识，不需要读者去脑补「空 = 跟随」。
+  setMainModel: (value) =>
+    set((state) =>
+      state.auxiliaryFollowsMain
+        ? { mainModel: value, auxiliaryModel: value }
+        : { mainModel: value },
+    ),
   auxiliaryModel: "",
-  setAuxiliaryModel: (value) => set({ auxiliaryModel: value }),
+  setAuxiliaryModel: (value) => set({ auxiliaryModel: value, auxiliaryFollowsMain: false }),
+  auxiliaryFollowsMain: true,
 }));

@@ -23,8 +23,9 @@ interface ModelPickerProps {
   /** `null` = 清单还没加载；`[]` = 发现失败落到手填态（ADR-0016）。 */
   models: ModelItem[] | null;
   placeholder?: string;
-  emptyLabel?: string;
   disabled?: boolean;
+  /** 显示在标签右侧的跟随状态徽标（auxiliary 跟随 main 时用，issue #70）。 */
+  followBadge?: string;
 }
 
 /**
@@ -40,8 +41,8 @@ export function ModelPicker({
   onChange,
   models,
   placeholder,
-  emptyLabel,
   disabled,
+  followBadge,
 }: ModelPickerProps) {
   const trimmed = value.trim();
   const knownIds = models ? new Set(models.map((model) => model.id)) : null;
@@ -52,6 +53,7 @@ export function ModelPicker({
     <div className="model-picker">
       <label className="advanced-slot-label" htmlFor={id}>
         {label}
+        {followBadge && <span className="follow-badge">{followBadge}</span>}
       </label>
       <input
         id={id}
@@ -64,7 +66,6 @@ export function ModelPicker({
         autoComplete="off"
         spellCheck={false}
       />
-      {trimmed === "" && emptyLabel && <p className="advanced-hint">{emptyLabel}</p>}
       {isOffList && <p className="advanced-hint advanced-hint--offlist">不在清单中，仍可发送</p>}
       {groups.length > 0 && (
         <div className="model-picker-groups" role="list" aria-label={`${label}建议清单`}>

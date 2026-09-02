@@ -26,7 +26,26 @@ function SearchResultsCard({ structured }: { structured: Record<string, unknown>
           <li className="tool-card-hit" key={url ?? index}>
             {domain && <DomainBadge domain={domain} />}
             <div className="tool-card-hit-body">
-              <p className="tool-card-hit-title">{typeof hit.title === "string" ? hit.title : url}</p>
+              {/*
+                搜索结果的标题直接是通往原文的链接——读者判断这条命中值不值得
+                信，靠的就是点进去看。新标签打开，不顶掉正在读的这次运行；
+                `noopener noreferrer` 既断开 `window.opener`，也不把本站地址
+                作为 referrer 送给第三方（与不取远程 favicon 是同一条隐私取舍）。
+              */}
+              <p className="tool-card-hit-title">
+                {url ? (
+                  <a
+                    className="tool-card-hit-link"
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {typeof hit.title === "string" ? hit.title : url}
+                  </a>
+                ) : typeof hit.title === "string" ? (
+                  hit.title
+                ) : null}
+              </p>
               {domain && <span className="tool-card-hit-domain">{domain}</span>}
               {score !== null && (
                 <div className="tool-card-score" aria-label={`相关性 ${(score * 100).toFixed(0)}%`}>
@@ -52,7 +71,13 @@ function ReaderResultCard({ structured }: { structured: Record<string, unknown> 
     <div className="tool-card-reader">
       {domain && <DomainBadge domain={domain} />}
       <div className="tool-card-hit-body">
-        <p className="tool-card-hit-title">{url}</p>
+        <p className="tool-card-hit-title">
+          {url ? (
+            <a className="tool-card-hit-link" href={url} target="_blank" rel="noopener noreferrer">
+              {url}
+            </a>
+          ) : null}
+        </p>
         <span className="tool-card-hit-domain">
           {mode ?? "read"} · 约 {tokenCount ?? "—"} token{truncated ? " · 已截断" : ""}
         </span>

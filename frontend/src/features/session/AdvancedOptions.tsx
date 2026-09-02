@@ -5,10 +5,18 @@ import { getModelProfiles, getModels, refreshModels } from "../../api/client";
 import type { components } from "../../generated/api";
 import { CUSTOM_PROFILE, useModelOptionsStore } from "../../stores/model-options-store";
 import { ModelPicker } from "./ModelPicker";
+import { SecretInput } from "./SecretInput";
 
 type Protocol = components["schemas"]["ModelRefreshRequest"]["protocol"];
 
 const PROTOCOLS: Protocol[] = ["openai_responses", "openai_chat_completions", "anthropic_messages"];
+
+/**
+ * 鉴权字段的常见取值——中转站几乎只用这两个头名，第三个选项把自由输入
+ * 留在原地。后端 `validate_auth_field` 接受任何合法 HTTP header 名，选项卡
+ * 只是把两个高频值提到手边，不缩小可填集合。
+ */
+const AUTH_FIELD_PRESETS = ["Authorization", "x-api-key"] as const;
 
 /**
  * 高级选项——正好四个槽位（issue #70）：端点档案、密钥输入、main 标识、
@@ -36,6 +44,7 @@ export function AdvancedOptions({ disabled = false }: AdvancedOptionsProps) {
   const setMainModel = useModelOptionsStore((state) => state.setMainModel);
   const auxiliaryModel = useModelOptionsStore((state) => state.auxiliaryModel);
   const setAuxiliaryModel = useModelOptionsStore((state) => state.setAuxiliaryModel);
+  const auxiliaryFollowsMain = useModelOptionsStore((state) => state.auxiliaryFollowsMain);
 
   const profilesQuery = useQuery({ queryKey: ["model-profiles"], queryFn: getModelProfiles });
   // unavailable 的档案压根不进选单，也不解释原因——站长没配 key 是内部信息（issue #70）。
@@ -48,6 +57,9 @@ export function AdvancedOptions({ disabled = false }: AdvancedOptionsProps) {
       setProfileChoice(availableProfiles[0]?.name ?? CUSTOM_PROFILE);
     }
   }, [profileChoice, profilesQuery.data, availableProfiles, setProfileChoice]);
+
+  // 空串 = 用户点了「自定义」还没填；两个预设之外的任何值也归自定义态。
+  const authFieldIsCustom = !AUTH_FIELD_PRESETS.some((preset) => preset === custom.authField);
 
   const isCustom = profileChoice === CUSTOM_PROFILE;
   const presetProfile = isCustom ? null : profileChoice;
@@ -103,7 +115,7 @@ export function AdvancedOptions({ disabled = false }: AdvancedOptionsProps) {
       <div className="advanced-slot">
         <span className="advanced-slot-label">端点档案</span>
         <select
-          className="advanced-input"
+          className="advanced-input advanced-select"
           value={profileChoice ?? ""}
           onChange={(event) => setProfileChoice(event.target.value)}
           disabled={disabled}
@@ -122,10 +134,11 @@ export function AdvancedOptions({ disabled = false }: AdvancedOptionsProps) {
         {isCustom ? (
           <div className="custom-endpoint-fields">
             <select
-              className="advanced-input"
+              className="advanced-input advanced-select"
               value={custom.protocol}
               onChange={(event) => setCustomField("protocol", event.target.value as Protocol)}
               disabled={disabled}
+              aria-label="上游协议"
             >
               {PROTOCOLS.map((protocol) => (
                 <option key={protocol} value={protocol}>
@@ -142,22 +155,49 @@ export function AdvancedOptions({ disabled = false }: AdvancedOptionsProps) {
               autoComplete="off"
               disabled={disabled}
             />
-            <input
-              className="advanced-input"
-              type="text"
-              placeholder="鉴权字段（默认 Authorization）"
-              value={custom.authField}
-              onChange={(event) => setCustomField("authField", event.target.value)}
-              autoComplete="off"
-              disabled={disabled}
-            />
-            <input
-              className="advanced-input"
-              type="password"
-              placeholder="API key"
+            {/*
+              鉴权字段做成选项卡而不是裸输入框：两个高频头名直接可选，选「自定义」
+              才落回自由输入。后端仍按合法 header 名校验，选项卡不缩小可填集合。
+            */}
+            <div className="auth-field-tabs" role="group" aria-label="鉴权模式">
+              {AUTH_FIELD_PRESETS.map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  className={`auth-field-tab${custom.authField === preset ? " auth-field-tab--active" : ""}`}
+                  onClick={() => setCustomField("authField", preset)}
+                  disabled={disabled}
+                  aria-pressed={custom.authField === preset}
+                >
+                  {preset}
+                </button>
+              ))}
+              <button
+                type="button"
+                className={`auth-field-tab${authFieldIsCustom ? " auth-field-tab--active" : ""}`}
+                onClick={() => setCustomField("authField", "")}
+                disabled={disabled}
+                aria-pressed={authFieldIsCustom}
+              >
+                自定义
+              </button>
+            </div>
+            {authFieldIsCustom && (
+              <input
+                className="advanced-input"
+                type="text"
+                placeholder="鉴权头字段名"
+                value={custom.authField}
+                onChange={(event) => setCustomField("authField", event.target.value)}
+                autoComplete="off"
+                disabled={disabled}
+                aria-label="自定义鉴权头字段名"
+              />
+            )}
+            <SecretInput
               value={custom.apiKey}
-              onChange={(event) => setCustomField("apiKey", event.target.value)}
-              autoComplete="off"
+              onChange={(value) => setCustomField("apiKey", value)}
+              placeholder="API key"
               disabled={disabled}
             />
             <button
@@ -217,14 +257,19 @@ export function AdvancedOptions({ disabled = false }: AdvancedOptionsProps) {
         placeholder="模型标识"
         disabled={disabled}
       />
+      {/*
+        auxiliary 默认跟随 main（ADR-0012：它绝大多数时候只做标题生成，与主模型
+        同源是常态）——选完主模型这里同步落上同一个标识，看得见、也仍然可改。
+        用户一旦手改过就不再跟随，此后换主模型不会冲掉他的选择。
+      */}
       <ModelPicker
         id="advanced-auxiliary-model"
         label="auxiliary 模型标识"
         value={auxiliaryModel}
         onChange={setAuxiliaryModel}
         models={activeModels}
-        placeholder="留空跟随主模型"
-        emptyLabel="跟随主模型"
+        placeholder="跟随主模型"
+        followBadge={auxiliaryFollowsMain ? "跟随主模型" : undefined}
         disabled={disabled}
       />
     </div>
