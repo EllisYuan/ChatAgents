@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { getSessionDetail, getSessionRuns } from "../../api/client";
+import { buildModelOverride, useModelOptionsStore } from "../../stores/model-options-store";
 import { useSessionListStore } from "../../stores/session-list-store";
 import { useTraceStream } from "../trace/useTraceStream";
 import { streamRun } from "./agui-stream";
@@ -97,9 +98,18 @@ export function useAgentRun(sessionId: string) {
       let failed = false;
       const startedAt = performance.now();
 
+      // 覆盖在按下发送这一刻取快照——这一轮用的就是当时选中的那个模型，运行途中
+      // 再改高级选项不影响它（issue #82：覆盖是运行级的，服务端不存任何选择状态）。
+      const modelOverride = buildModelOverride(useModelOptionsStore.getState());
+
       try {
         await streamRun(
-          { session_id: sessionId, message: trimmed, effort },
+          {
+            session_id: sessionId,
+            message: trimmed,
+            effort,
+            ...(modelOverride ? { model_override: modelOverride } : {}),
+          },
           {
             onTextDelta(delta) {
               setMessages((prev) =>

@@ -116,6 +116,9 @@ def test_models_contract_distinguishes_unavailable_profile_from_empty_catalog(
             "name": "anthropic-official",
             "status": "unavailable",
             "reason": "环境变量 ANTHROPIC_API_KEY 未设置",
+            # 不可用的档案不回显模型标识：连密钥都没配，谈不上会用哪个模型。
+            "main_model": None,
+            "auxiliary_model": None,
         }
         assert body["error"] is None
 
@@ -133,15 +136,26 @@ def test_model_profiles_lists_available_and_unavailable(monkeypatch: Any) -> Non
         async with _client() as client:
             response = await client.get("/api/models/profiles")
         assert response.status_code == 200
+        # 可用档案回显 endpoints.yaml 里的模型标识，供前端预填输入框；`default_profile`
+        # 是前端判断「档案是否偏离默认」的参照物（issue #82）。
         assert response.json() == {
+            "default_profile": "anthropic-official",
             "profiles": [
-                {"name": "anthropic-official", "status": "available", "reason": None},
+                {
+                    "name": "anthropic-official",
+                    "status": "available",
+                    "reason": None,
+                    "main_model": "claude-sonnet-5",
+                    "auxiliary_model": None,
+                },
                 {
                     "name": "openai-official",
                     "status": "unavailable",
                     "reason": "环境变量 OPENAI_API_KEY 未设置",
+                    "main_model": None,
+                    "auxiliary_model": None,
                 },
-            ]
+            ],
         }
 
     asyncio.run(scenario())

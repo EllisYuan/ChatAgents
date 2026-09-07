@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Callable
+from contextlib import AsyncExitStack
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -27,7 +28,7 @@ from ..llm.events import ModelCallCompleted
 from ..llm.events import ReasoningDelta as ModelReasoningDelta
 from ..llm.events import TextDelta as ModelTextDelta
 from ..llm.message import ContentBlock, ModelMessage, TextBlock, ToolCallBlock, ToolResultBlock
-from ..llm.port import ModelPort, get_model_port
+from ..llm.port import ModelPort, model_port_scope
 from ..llm.profile import EndpointProfile
 from ..validation import MAX_TITLE_LENGTH
 from .events import (
@@ -129,13 +130,64 @@ class AgentRunner:
         self,
         *,
         tool_executor: ToolExecutor | None = None,
-        model_port_factory: ModelPortFactory = get_model_port,
+        model_port_factory: ModelPortFactory | None = None,
     ) -> None:
         self._tool_executor = tool_executor if tool_executor is not None else ToolExecutor()
         self._model_port_factory = model_port_factory
 
     async def run(
         self,
+        messages: list[ModelMessage],
+        *,
+        profile: EndpointProfile,
+        main_model: str,
+        auxiliary_model: str,
+        effort: EffortTier,
+        http_client: Any,
+        run_id: str | None = None,
+        session_id: UUID | None = None,
+        generate_title: bool = False,
+        shared_model_client: bool = True,
+        system_prompt: str | None = None,
+        prompt_version_id: str | None = None,
+        tool_schema_version_id: str | None = None,
+    ) -> AsyncIterator[RunEvent]:
+        """跑一条完整运行；本方法只决定 ``ModelPort`` 从哪来、活多久。
+
+        ``shared_model_client`` 为假时，模型侧的 HTTP 客户端只活这一次运行——访客
+        自带的中转站不进进程级共享缓存（issue #82）。它只影响默认构造路径；注入了
+        ``model_port_factory`` 的调用方（测试、评测）自己决定客户端怎么来，本方法
+        不替它收尾。循环本身在 :meth:`_run_with_port`。
+        """
+
+        async with AsyncExitStack() as stack:
+            port = (
+                self._model_port_factory(profile)
+                if self._model_port_factory is not None
+                else await stack.enter_async_context(
+                    model_port_scope(profile, shared_client=shared_model_client)
+                )
+            )
+            async for event in self._run_with_port(
+                port,
+                messages,
+                profile=profile,
+                main_model=main_model,
+                auxiliary_model=auxiliary_model,
+                effort=effort,
+                http_client=http_client,
+                run_id=run_id,
+                session_id=session_id,
+                generate_title=generate_title,
+                system_prompt=system_prompt,
+                prompt_version_id=prompt_version_id,
+                tool_schema_version_id=tool_schema_version_id,
+            ):
+                yield event
+
+    async def _run_with_port(
+        self,
+        port: ModelPort,
         messages: list[ModelMessage],
         *,
         profile: EndpointProfile,
@@ -164,7 +216,6 @@ class AgentRunner:
         """
         run_id = run_id if run_id is not None else str(uuid4())
         history: list[ModelMessage] = list(messages)
-        port = self._model_port_factory(profile)
         title_task: asyncio.Task[TitleGenerated] | None = None
         title_emitted = False
         first_user_text = _first_user_text(history)
@@ -214,6 +265,7 @@ class AgentRunner:
             yield IterationStarted(
                 run_id=run_id,
                 iteration=iteration,
+                model=main_model,
                 prompt_version_id=prompt_version_id,
                 tool_schema_version_id=tool_schema_version_id,
             )

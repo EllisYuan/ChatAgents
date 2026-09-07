@@ -20,7 +20,7 @@ from chat_agents.transport.sse import encode_sse
 
 async def _events() -> AsyncIterator[object]:
     yield TitleGenerationStarted(run_id="run-title", model="aux")
-    yield IterationStarted(run_id="run-title", iteration=1)
+    yield IterationStarted(run_id="run-title", iteration=1, model="test-model")
     yield TitleGenerated(
         run_id="run-title",
         session_id=UUID("00000000-0000-0000-0000-000000000001"),
@@ -42,7 +42,6 @@ def test_title_generated_is_a_custom_event_with_auxiliary_usage() -> None:
                 _events(),
                 session_id=UUID("00000000-0000-0000-0000-000000000001"),
                 run_id="run-title",
-                model="main",
             )
         ]
 

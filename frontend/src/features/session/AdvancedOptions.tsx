@@ -20,9 +20,8 @@ const AUTH_FIELD_PRESETS = ["Authorization", "x-api-key"] as const;
 
 /**
  * 高级选项——正好四个槽位（issue #70）：端点档案、密钥输入、main 标识、
- * auxiliary 标识。选择结果目前只落成前端状态：``POST /api/runs`` 的
- * ``RunRequest`` 还没有模型覆盖字段（issue #59 明确把 BYOK 划出范围），
- * 打通那条链路是后续票的范围，这里先把交互面做完整。
+ * auxiliary 标识。选中的值随 `POST /api/runs` 的 `model_override` 发出，且
+ * **只在偏离服务端预设时才传**（issue #82，构造逻辑在 `buildModelOverride`）。
  */
 interface AdvancedOptionsProps {
   /** 运行中禁用编辑——改选择不影响正在跑的这一轮（issue #70）。 */
@@ -45,18 +44,38 @@ export function AdvancedOptions({ disabled = false }: AdvancedOptionsProps) {
   const auxiliaryModel = useModelOptionsStore((state) => state.auxiliaryModel);
   const setAuxiliaryModel = useModelOptionsStore((state) => state.setAuxiliaryModel);
   const auxiliaryFollowsMain = useModelOptionsStore((state) => state.auxiliaryFollowsMain);
+  const setDefaultProfile = useModelOptionsStore((state) => state.setDefaultProfile);
+  const prefillFromProfile = useModelOptionsStore((state) => state.prefillFromProfile);
 
   const profilesQuery = useQuery({ queryKey: ["model-profiles"], queryFn: getModelProfiles });
   // unavailable 的档案压根不进选单，也不解释原因——站长没配 key 是内部信息（issue #70）。
-  const availableProfiles = (profilesQuery.data ?? []).filter(
+  const availableProfiles = (profilesQuery.data?.profiles ?? []).filter(
     (profile) => profile.status === "available",
   );
 
   useEffect(() => {
-    if (profileChoice === null && profilesQuery.data) {
-      setProfileChoice(availableProfiles[0]?.name ?? CUSTOM_PROFILE);
+    const data = profilesQuery.data;
+    if (!data) return;
+    setDefaultProfile(data.default_profile);
+    if (profileChoice === null) {
+      // 默认档案优先，而不是「列表第一个」——后者与服务端的 default_profile 无关。
+      const initial = availableProfiles.some((profile) => profile.name === data.default_profile)
+        ? data.default_profile
+        : (availableProfiles[0]?.name ?? CUSTOM_PROFILE);
+      setProfileChoice(initial);
     }
-  }, [profileChoice, profilesQuery.data, availableProfiles, setProfileChoice]);
+  }, [profileChoice, profilesQuery.data, availableProfiles, setProfileChoice, setDefaultProfile]);
+
+  // 预填「服务端真正会用的那个模型」（issue #82）——用户手改过 main 之后就不再落值。
+  const selectedProfile = availableProfiles.find((profile) => profile.name === profileChoice);
+  useEffect(() => {
+    if (selectedProfile) {
+      prefillFromProfile(
+        selectedProfile.main_model ?? null,
+        selectedProfile.auxiliary_model ?? null,
+      );
+    }
+  }, [selectedProfile, prefillFromProfile]);
 
   // 空串 = 用户点了「自定义」还没填；两个预设之外的任何值也归自定义态。
   const authFieldIsCustom = !AUTH_FIELD_PRESETS.some((preset) => preset === custom.authField);

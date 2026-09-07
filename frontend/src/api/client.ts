@@ -39,15 +39,20 @@ export async function getModels(endpointProfile?: string): Promise<ModelsRespons
 }
 
 export type ModelProfileView = components["schemas"]["ModelProfileView"];
+export type ModelProfilesResponse = components["schemas"]["ModelProfilesResponse"];
 
-/** 服务端已配置的端点档案（issue #70）——档案选择槽位据此渲染，不硬编码档案名。 */
-export async function getModelProfiles(): Promise<ModelProfileView[]> {
+/**
+ * 服务端已配置的端点档案（issue #70）——档案选择槽位据此渲染，不硬编码档案名。
+ *
+ * 整个响应原样交出而不是只抽 `profiles`：`default_profile` 是前端判断「是否偏离
+ * 默认」的参照物，各档案的模型标识用于预填输入框（issue #82）。
+ */
+export async function getModelProfiles(): Promise<ModelProfilesResponse> {
   const response = await fetch("/api/models/profiles");
   if (!response.ok) {
     throw new Error(`获取端点档案失败：${response.status}`);
   }
-  const body = (await response.json()) as components["schemas"]["ModelProfilesResponse"];
-  return body.profiles ?? [];
+  return (await response.json()) as ModelProfilesResponse;
 }
 
 export type ModelRefreshRequest = components["schemas"]["ModelRefreshRequest"];

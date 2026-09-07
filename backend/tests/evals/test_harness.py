@@ -155,7 +155,7 @@ def test_batch_evaluation_produces_exactly_seven_metrics_and_snapshot() -> None:
         should_use_tools=False,
     )
     researched_events = [
-        IterationStarted(run_id="run-a", iteration=1),
+        IterationStarted(run_id="run-a", iteration=1, model="test-model"),
         ToolStarted(
             run_id="run-a",
             iteration=1,
@@ -191,7 +191,7 @@ def test_batch_evaluation_produces_exactly_seven_metrics_and_snapshot() -> None:
             iteration=1,
             text="显示摘要里的 https://summary.test/ 不应参与打分",
         ),
-        IterationStarted(run_id="run-a", iteration=2),
+        IterationStarted(run_id="run-a", iteration=2, model="test-model"),
         RunCompleted(
             run_id="run-a",
             iteration=2,
@@ -199,7 +199,7 @@ def test_batch_evaluation_produces_exactly_seven_metrics_and_snapshot() -> None:
         ),
     ]
     direct_events = [
-        IterationStarted(run_id="run-b", iteration=1),
+        IterationStarted(run_id="run-b", iteration=1, model="test-model"),
         RunCompleted(run_id="run-b", iteration=1, message=_answer("2")),
     ]
     judge = FakeJudge()
@@ -254,7 +254,8 @@ def test_deterministic_metrics_respond_to_violations() -> None:
         should_use_tools=False,
     )
     events: list[Any] = [
-        IterationStarted(run_id="run", iteration=iteration) for iteration in range(1, 5)
+        IterationStarted(run_id="run", iteration=iteration, model="test-model")
+        for iteration in range(1, 5)
     ]
     events.extend(
         [
@@ -303,7 +304,7 @@ def test_argument_compliance_uses_the_schema_for_that_version() -> None:
         should_use_tools=True,
     )
     events = [
-        IterationStarted(run_id="run", iteration=1),
+        IterationStarted(run_id="run", iteration=1, model="test-model"),
         ToolStarted(
             run_id="run",
             iteration=1,
@@ -346,7 +347,8 @@ def test_trajectory_efficiency_exposes_all_three_subsignals() -> None:
     )
     hard_cap = STEP_BUDGETS["low"].hard_cap
     events: list[Any] = [
-        IterationStarted(run_id="run", iteration=iteration) for iteration in range(1, hard_cap + 1)
+        IterationStarted(run_id="run", iteration=iteration, model="test-model")
+        for iteration in range(1, hard_cap + 1)
     ]
     events.extend(
         [
@@ -400,7 +402,7 @@ def test_search_without_read_is_measured_as_a_rate() -> None:
         should_use_tools=True,
     )
     events = [
-        IterationStarted(run_id="run", iteration=1),
+        IterationStarted(run_id="run", iteration=1, model="test-model"),
         ToolStarted(
             run_id="run",
             iteration=1,

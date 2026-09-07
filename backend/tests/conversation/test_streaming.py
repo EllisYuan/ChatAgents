@@ -60,7 +60,7 @@ def test_persist_writes_each_iteration_and_grouped_tool_message() -> None:
 
             source = _events(
                 [
-                    IterationStarted(run_id=RUN_ID, iteration=1),
+                    IterationStarted(run_id=RUN_ID, iteration=1, model="test-model"),
                     IterationCompleted(
                         run_id=RUN_ID,
                         iteration=1,
@@ -83,7 +83,7 @@ def test_persist_writes_each_iteration_and_grouped_tool_message() -> None:
                         result="result text",
                         structured=None,
                     ),
-                    IterationStarted(run_id=RUN_ID, iteration=2),
+                    IterationStarted(run_id=RUN_ID, iteration=2, model="test-model"),
                     IterationCompleted(
                         run_id=RUN_ID,
                         iteration=2,
@@ -136,7 +136,7 @@ def test_persist_survives_client_disconnect_leaving_written_parts_intact() -> No
             final_message = ModelMessage(role="assistant", content=(TextBlock(text="partial"),))
             source = _events(
                 [
-                    IterationStarted(run_id=RUN_ID, iteration=1),
+                    IterationStarted(run_id=RUN_ID, iteration=1, model="test-model"),
                     IterationCompleted(
                         run_id=RUN_ID,
                         iteration=1,

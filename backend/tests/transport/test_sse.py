@@ -46,7 +46,7 @@ def _usage(**overrides: object) -> Usage:
 def _frames(source: AsyncIterator[RunEvent]) -> list[dict[str, object]]:
     async def collect() -> list[dict[str, object]]:
         out = []
-        async for line in encode_sse(source, session_id=SESSION_ID, run_id=RUN_ID, model="gpt"):
+        async for line in encode_sse(source, session_id=SESSION_ID, run_id=RUN_ID):
             out.append(json.loads(line))
         return out
 
@@ -58,7 +58,7 @@ def test_text_only_run_emits_expected_type_sequence() -> None:
     frames = _frames(
         _events(
             [
-                IterationStarted(run_id=RUN_ID, iteration=1),
+                IterationStarted(run_id=RUN_ID, iteration=1, model="test-model"),
                 TextDelta(run_id=RUN_ID, iteration=1, text="你好"),
                 IterationCompleted(
                     run_id=RUN_ID, iteration=1, message=message, usage=_usage(), stop_reason="stop"
@@ -81,9 +81,10 @@ def test_text_only_run_emits_expected_type_sequence() -> None:
     assert frames[3]["delta"] == "你好"
     usage_frame, span_frame = frames[6], frames[7]
     assert usage_frame["name"] == "chatagents.usage"
+    # 模型标识来自 IterationStarted 事件本身，不再来自 encode_sse 的入参（issue #82）。
     assert usage_frame["value"] == {
         "role": "main",
-        "model": "gpt",
+        "model": "test-model",
         "usage_status": "complete",
         "input_tokens": 10,
         "output_tokens": 5,
@@ -101,7 +102,7 @@ def test_reasoning_then_text_closes_reasoning_before_opening_text() -> None:
     frames = _frames(
         _events(
             [
-                IterationStarted(run_id=RUN_ID, iteration=1),
+                IterationStarted(run_id=RUN_ID, iteration=1, model="test-model"),
                 ReasoningDelta(run_id=RUN_ID, iteration=1, text="想想"),
                 TextDelta(run_id=RUN_ID, iteration=1, text="答案"),
                 IterationCompleted(
@@ -131,7 +132,7 @@ def test_tool_round_trip_emits_both_result_outlets() -> None:
     frames = _frames(
         _events(
             [
-                IterationStarted(run_id=RUN_ID, iteration=1),
+                IterationStarted(run_id=RUN_ID, iteration=1, model="test-model"),
                 IterationCompleted(
                     run_id=RUN_ID,
                     iteration=1,
@@ -182,7 +183,7 @@ def test_tool_result_status_is_error_when_structured_is_none() -> None:
     frames = _frames(
         _events(
             [
-                IterationStarted(run_id=RUN_ID, iteration=1),
+                IterationStarted(run_id=RUN_ID, iteration=1, model="test-model"),
                 ToolStarted(
                     run_id=RUN_ID,
                     iteration=1,
@@ -219,7 +220,7 @@ def test_run_failed_maps_to_run_error_with_dedicated_code() -> None:
 
 def test_unexpected_exception_becomes_run_error_with_shared_error_code() -> None:
     async def failing() -> AsyncIterator[RunEvent]:
-        yield IterationStarted(run_id=RUN_ID, iteration=1)
+        yield IterationStarted(run_id=RUN_ID, iteration=1, model="test-model")
         raise UpstreamUnavailable("上游挂了")
 
     frames = _frames(failing())
