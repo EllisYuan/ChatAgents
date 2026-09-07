@@ -12,7 +12,7 @@ from sqlalchemy.orm import DeclarativeBase
 APP_SCHEMA = "app"
 OBSERVABILITY_SCHEMA = "obs"
 MANAGED_SCHEMAS = frozenset({APP_SCHEMA, OBSERVABILITY_SCHEMA})
-_DEFAULT_DATABASE_URL = "postgresql+psycopg://postgres:postgres@localhost:5432/chat_agents"
+_DEFAULT_DATABASE_URL = "postgresql+psycopg://root:Agent%40Dev_1@127.0.0.1:5432/chat_agents"
 
 
 class Base(DeclarativeBase):

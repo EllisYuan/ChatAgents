@@ -14,7 +14,7 @@ from sqlalchemy.engine import Connection
 config = context.config
 
 target_metadata = Base.metadata
-_DEFAULT_DATABASE_URL = "postgresql+psycopg://postgres:postgres@localhost:5432/chat_agents"
+_DEFAULT_DATABASE_URL = "postgresql+psycopg://root:Agent%40Dev_1@127.0.0.1:5432/chat_agents"
 
 
 def database_url() -> str:

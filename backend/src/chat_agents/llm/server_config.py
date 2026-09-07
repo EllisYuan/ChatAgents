@@ -8,13 +8,20 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
 from pydantic import SecretStr
 
+from ..validation import (
+    MAX_PROFILE_NAME_LENGTH,
+    validate_auth_field,
+    validate_base_url,
+    validate_identifier,
+    validate_model_identifier,
+)
 from .errors import ConfigError
 from .profile import EndpointProfile
 from .protocol import DEFAULT_PROTOCOL, PROTOCOLS, Protocol
@@ -39,9 +46,16 @@ class ServerEndpointsConfig:
 
 def _require_str(entry: dict, field: str, *, where: str) -> str:
     value = entry.get(field)
-    if not isinstance(value, str) or not value:
+    if not isinstance(value, str) or not value.strip():
         raise ConfigError(f"{where} 缺少字符串字段 {field}")
     return value
+
+
+def _validated(value: str, *, field: str, where: str, validator: Callable[[str], str]) -> str:
+    try:
+        return validator(value)
+    except ValueError as exc:
+        raise ConfigError(f"{where} 的 {field} 不合法：{exc}") from exc
 
 
 def load_server_endpoints(path: Path) -> ServerEndpointsConfig:
@@ -59,7 +73,14 @@ def load_server_endpoints(path: Path) -> ServerEndpointsConfig:
     if not isinstance(raw, dict):
         raise ConfigError(f"端点配置文件顶层必须是一个映射：{path}")
 
-    default_profile = _require_str(raw, "default_profile", where="端点配置文件")
+    default_profile = _validated(
+        _require_str(raw, "default_profile", where="端点配置文件"),
+        field="default_profile",
+        where="端点配置文件",
+        validator=lambda value: validate_identifier(
+            value, field="default_profile", max_length=MAX_PROFILE_NAME_LENGTH
+        ),
+    )
 
     raw_endpoints = raw.get("endpoints")
     if not isinstance(raw_endpoints, list) or not raw_endpoints:
@@ -70,8 +91,26 @@ def load_server_endpoints(path: Path) -> ServerEndpointsConfig:
         where = f"endpoints[{index}]"
         if not isinstance(entry, dict):
             raise ConfigError(f"{where} 必须是一个映射")
+        unknown = set(entry) - {
+            "name",
+            "protocol",
+            "base_url",
+            "auth_field",
+            "auth_secret_ref",
+            "main_model",
+            "auxiliary_model",
+        }
+        if unknown:
+            raise ConfigError(f"{where} 包含未知字段：{', '.join(sorted(unknown))}")
 
-        name = _require_str(entry, "name", where=where)
+        name = _validated(
+            _require_str(entry, "name", where=where),
+            field="name",
+            where=where,
+            validator=lambda value: validate_identifier(
+                value, field="name", max_length=MAX_PROFILE_NAME_LENGTH
+            ),
+        )
         if name in profiles:
             raise ConfigError(f"endpoints 中存在重复的 name：{name}")
 
@@ -79,14 +118,36 @@ def load_server_endpoints(path: Path) -> ServerEndpointsConfig:
         if protocol not in PROTOCOLS:
             raise ConfigError(f"档案 {name} 的 protocol 不合法：{protocol!r}")
 
-        base_url = _require_str(entry, "base_url", where=f"档案 {name}")
-        auth_field = _require_str(entry, "auth_field", where=f"档案 {name}")
+        base_url = _validated(
+            _require_str(entry, "base_url", where=f"档案 {name}"),
+            field="base_url",
+            where=f"档案 {name}",
+            validator=validate_base_url,
+        )
+        auth_field = _validated(
+            _require_str(entry, "auth_field", where=f"档案 {name}"),
+            field="auth_field",
+            where=f"档案 {name}",
+            validator=validate_auth_field,
+        )
         auth_secret_ref = _require_str(entry, "auth_secret_ref", where=f"档案 {name}")
-        main_model = _require_str(entry, "main_model", where=f"档案 {name}")
+        main_model = _validated(
+            _require_str(entry, "main_model", where=f"档案 {name}"),
+            field="main_model",
+            where=f"档案 {name}",
+            validator=lambda value: validate_model_identifier(value, field="main_model"),
+        )
 
         auxiliary_model = entry.get("auxiliary_model")
         if auxiliary_model is not None and not isinstance(auxiliary_model, str):
             raise ConfigError(f"档案 {name} 的 auxiliary_model 必须是字符串或省略")
+        if auxiliary_model is not None:
+            auxiliary_model = _validated(
+                auxiliary_model,
+                field="auxiliary_model",
+                where=f"档案 {name}",
+                validator=lambda value: validate_model_identifier(value, field="auxiliary_model"),
+            )
 
         profiles[name] = ServerProfileDefinition(
             name=name,

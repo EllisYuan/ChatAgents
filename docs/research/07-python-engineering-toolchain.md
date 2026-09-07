@@ -107,7 +107,6 @@ authors = [
 dependencies = [
     "fastapi>=0.111.0",
     "uvicorn[standard]>=0.30.0",
-    "streamlit>=1.35.0",
     "pydantic>=2.7.0",
     "openai>=1.30.0",
     "anthropic>=0.28.0",
@@ -182,7 +181,6 @@ warn_unused_ignores = true
 
 [[tool.mypy.overrides]]
 module = [
-    "streamlit.*",
     "tavily.*",
     "langchain.*",
     "langgraph.*",
@@ -234,7 +232,7 @@ python_functions = ["test_*"]
 - **`check_untyped_defs = true`**：即使函数未显式声明返回值，也会检查函数内部的代码逻辑类型错误。
 - **`disallow_incomplete_defs = true`**：防止写了参数类型却忘了写返回值类型的“半吊子”签名。
 - **`no_implicit_optional = true`**：显式要求 `str | None` 而不是默认隐式 `None`。
-- **`ignore_missing_imports = true`**：对 Streamlit、Tavily 等缺乏完整 stub 的第三方包予以豁免，避免无意义报错。
+- **`ignore_missing_imports = true`**：对 Tavily 等缺乏完整 stub 的第三方包予以豁免，避免无意义报错。
 
 ---
 
@@ -254,8 +252,8 @@ python_functions = ["test_*"]
 1. **L2 级网络零开销测试：`httpx.MockTransport`**
    - 用于底层 `AsyncOpenAI` / `AsyncAnthropic` / `Tavily` 的 Client 测试。
    - `httpx` 原生支持注入 `transport=httpx.MockTransport(custom_handler)`，其中 `custom_handler` 可以是一个 Python 异步生成器，按 Chunk 精确 `yield` SSE 格式文本，零 Socket 侵入，100% 稳定。
-2. **L2 级状态回放：LangGraph State Snapshot Replay**
-   - 利用 LangGraph `MemorySaver` 捕获的 `StateSnapshot` JSON 作为 Fixture，直接输入后半段逻辑，绕过大模型 HTTP 请求。
+2. **L2 级状态回放：AgentRunner Replay**
+   - 利用 `AgentRunner` 的事件与消息 Fixture 直接输入后半段逻辑，绕过大模型 HTTP 请求。
 
 ---
 
@@ -377,7 +375,7 @@ ENV PATH="/app/.venv/bin:$PATH" \
 
 EXPOSE 8080
 
-CMD ["python", "app.py"]
+CMD ["python", "-m", "uvicorn", "chat_agents.main:app", "--host", "0.0.0.0", "--port", "8080"]
 ```
 
 ### 11.2 CI 缓存配置 (`.github/workflows/ci.yml` 示例)

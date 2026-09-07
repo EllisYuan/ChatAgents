@@ -33,7 +33,10 @@ def test_tavily_search_uses_the_plainest_call_with_answer_and_raw_content_off():
     asyncio.run(client.aclose())
 
 
-def test_tavily_search_requires_api_key():
+def test_tavily_search_requires_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 断言的是「环境变量也没有」这条路径，必须自己造出这个前提：
+    # 包初始化会把仓库根 .env 读进 os.environ，开发机上这个键通常是有值的。
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
     client = _client(lambda r: httpx.Response(200, json={"results": []}))
     with pytest.raises(RuntimeError):
         TavilySearchPort(client, api_key=None)
@@ -73,7 +76,9 @@ def test_tavily_search_malformed_body_is_external_failure_not_a_crash():
     asyncio.run(client.aclose())
 
 
-def test_jina_reader_hits_the_plain_get_endpoint():
+def test_jina_reader_hits_the_plain_get_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 同上：这里验证的是「没配 key 就不带 Authorization」。
+    monkeypatch.delenv("JINA_API_KEY", raising=False)
     captured: dict[str, Any] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:

@@ -26,7 +26,7 @@
 
 不是为了绕开 httpx 分叉——绕开它只是红利。真正的理由是**回放要保护的东西在 `ModelPort` 之上**。
 
-[#13](https://github.com/EllisYuan/ChatAgents/issues/13) 定了 `AgentRunner` 必须纯：不碰 DB、不碰 HTTP、不知道 SSE。回放存在的意义正是让这个纯 Loop 零网络零数据库跑完。而 `ModelPort` 是 `llm/` 对外的唯一出入口（[ADR-0007](0007-backend-is-split-by-capability-not-by-layer.md) 定了 `llm/` 对全项目零依赖），在它的边界上换实现，测到的正好是「Loop 拿到这串事件会怎么走」——一步不多，一步不少。
+[#13](https://github.com/EllisYuan/ChatAgents/issues/13) 定了 `AgentRunner` 必须纯：不碰 DB、不碰 HTTP、不知道 SSE。回放存在的意义正是让这个纯 Loop 零网络零数据库跑完。而 `ModelPort` 是 `llm/` 对外的唯一出入口（[ADR-0007](0007-backend-is-split-by-capability-not-by-layer.md) 定了 `llm/` 不认识任何能力模块），在它的边界上换实现，测到的正好是「Loop 拿到这串事件会怎么走」——一步不多，一步不少。
 
 在 transport 层回放，则要连带把两个 SDK 的解析逻辑一起重跑一遍才能到达 Loop。那部分确实也需要测，但它是**另一件事**，见下。
 

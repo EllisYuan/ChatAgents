@@ -9,6 +9,7 @@ import re
 from dataclasses import dataclass, field
 
 from ...token_estimation import count_tokens, estimate_tokens
+from ...validation import validate_section
 from ..types import ToolResult
 
 TOKEN_THRESHOLD = 8_000  # 拍的，不是算的——待评测用章节选错率与答案完整率校准（ADR-0005）
@@ -98,12 +99,9 @@ def build_document(url: str, raw_markdown: str, *, calibration: float = 1.0) -> 
 
 
 def parse_section_indices(section_arg: str) -> list[int]:
-    indices: list[int] = []
-    for piece in section_arg.split(","):
-        piece = piece.strip()
-        if piece.isdigit():
-            indices.append(int(piece))
-    return indices
+    """解析并验证章节编号，不静默吞掉畸形参数。"""
+    normalized = validate_section(section_arg)
+    return [int(piece.strip()) for piece in normalized.split(",")]
 
 
 def _structure_summary(sections: list[Section]) -> list[dict]:
@@ -158,7 +156,9 @@ def assemble_result(
         "sections": _structure_summary(doc.sections),
     }
 
-    if section_arg:
+    if section_arg is not None:
+        if not isinstance(section_arg, str):
+            raise ValueError("section 必须是字符串")
         indices = set(parse_section_indices(section_arg))
         selected = [s for s in doc.sections if s.index in indices]
         structured["mode"] = "sections"

@@ -25,7 +25,7 @@
 1. **解耦评测框架选型**：推荐采用 **DeepEval + Pytest** 作为底层数据模型与指标计算引擎，配合 **Langfuse** 或 **OpenTelemetry** 进行生产环境 Trace 捕获。该组合对本项目自建 `ModelPort` 及 `AsyncOpenAI` / `AsyncAnthropic` 官方原生双 Client 架构实现零侵入。
 2. **推翻 VCR 纯 HTTP 拦截录制 LLM 流式 SSE 的假设**：实查表明 `vcrpy` 等传统 HTTP 录制库在处理 `httpx` 异步 SSE（Server-Sent Events）流式响应时存在块时间序丢失、连接池死锁及 Stream 提前中断擦除等严重缺陷。L2 级“零成本回放”层改为推荐 **LangGraph Execution State/Message Fixture 序列化** 或 **`httpx.MockTransport` 结构化 Chunk 级模拟**。
 3. **判官模型 (LLM-as-Judge) 严禁硬编码过时型号**：全面推翻上一版硬编码 2024 年型号（如 `gpt-4o-2024-08-06`、`claude-3-5-haiku`）的做法。提出判官模型五维选择标准（结构化 JSON 输出支持、长上下文忠实度、快照日期锁定、推理稳定性、综合 Cost/Token），并规定实施时必须通过 Provider API 动态读取或严格绑定带有固定日期快照的通用判官层。
-4. **增强轨迹指标血缘**：为 Tool Choice Accuracy、Sequential Constraint Violation Rate、Step Efficiency Score、Citation Faithfulness 等指标补全了明确的数学公式与针对 `backend/agent.py` / `backend/prompts.py` 的数据血缘（Data Lineage）映射。
+4. **增强轨迹指标血缘**：为 Tool Choice Accuracy、Sequential Constraint Violation Rate、Step Efficiency Score、Citation Faithfulness 等指标补全了明确的数学公式与针对 `旧 AgentRunner 实现` / `旧 AgentRunner 实现` 的数据血缘（Data Lineage）映射。
 
 ---
 
@@ -36,7 +36,7 @@
 | **判官模型 (LLM-as-Judge)** | 推荐使用 `gpt-4o-2024-08-06` 与 `claude-3-5-haiku` 作为判官模型。 | **全面推翻硬编码**。上版包含了 2024 年旧型号，属于凭记忆书写。v2 改为提供 5 维选型标准与快照锁定机制，型号必须在实施时动态解析。 | 2026-08 时点下，模型迭代已历经多代，必须采用带有固定日期快照（Date-tagged Snapshot）的模型版本，防止评测基线隐式漂移。 |
 | **VCR 录制回放可行性** | 假设 `vcrpy` / `pytest-vcr` 可直接拦截回放 LLM & Tavily 的 HTTP SSE 流式响应。 | **否定纯 Socket/HTTP 拦截方案**。VCR 处理 SSE 异步 Generator 存在 Chunk 间延迟丢失、Async-iterator 挂起与网络层 Hook 兼容问题。 | `vcrpy` 官方对 `httpx` async stream 的支持仍存在已知边缘 Bug。推荐引入 LangGraph State 序列化或 `httpx.MockTransport` 替代。 |
 | **框架支持度分类** | 统一列出框架功能，未区分支持来源与真实度。 | **新增三级硬核分类**（官方文档明确支持 / 社区实现 / 未能证实），逐一核实 2026-08 各框架的 Trajectory 评估能力。 | 避免误将第三方 Hook 或未验证的 GitHub Issue 描述当作官方原生功能。 |
-| **轨迹指标数据血缘** | 仅给出指标名称与口头定义。 | **新增完整数学计算公式与数据血缘**，明确数据从 `AIMessage.tool_calls`、`ToolMessage` 还是系统 Prompt 中提取。 | 代码库中 `backend/agent.py` 与 `backend/prompts.py` 有明确的硬性规则约束（如最大 5 次工具调用、禁止连续两次 Extract）。 |
+| **轨迹指标数据血缘** | 仅给出指标名称与口头定义。 | **新增完整数学计算公式与数据血缘**，明确数据从 `AIMessage.tool_calls`、`ToolMessage` 还是系统 Prompt 中提取。 | 代码库中 `旧 AgentRunner 实现` 与 `旧 AgentRunner 实现` 有明确的硬性规则约束（如最大 5 次工具调用、禁止连续两次 Extract）。 |
 
 ---
 
@@ -61,7 +61,7 @@
 3. **LangSmith (by LangChain)**
    - **状态与版本**：SaaS 商业化运行中。
    - **轨迹评测能力**：官方原生强支持。自动将 LangGraph 的 Checkpoint 与 Node 转换为 Agent Trajectory Tree，内置 Evaluator 检查 Step Count、Tool Selection。
-   - **解耦适配性**：**中等（存在生态倾向）**。若使用 LangGraph（如 `backend/agent.py`）则自动集成；若使用自建 `ModelPort`，则需要手动通过 SDK 上报 OpenTelemetry / LangSmith Trace Span。
+   - **解耦适配性**：**中等（存在生态倾向）**。若使用 LangGraph（如 `旧 AgentRunner 实现`）则自动集成；若使用自建 `ModelPort`，则需要手动通过 SDK 上报 OpenTelemetry / LangSmith Trace Span。
    - **官方 URL**：`https://docs.smith.langchain.com/`（查询日期：2026-08-06）
 
 4. **Langfuse**
@@ -141,7 +141,7 @@ Web 搜索 Agent 的调用包含两类 HTTP 交互：
 ```
 
 1. **方案 A（推荐主打）：LangGraph 状态快照回放 (State Fixture Replay)**
-   - 在 `backend/agent.py` 中，LangGraph 天然具备 `checkpointer=MemorySaver()`。
+   - 在 `旧 AgentRunner 实现` 中，LangGraph 天然具备 `checkpointer=MemorySaver()`。
    - 测试时，直接读取预先保存的 `StateSnapshot` JSON 数据作为测试入参，跳过 LLM 引擎网络请求，测试后半程的 `output_summarizer` 与 Rule Assertions。
 2. **方案 B（针对 HTTP 层的精细测试）：`httpx.MockTransport`**
    - 使用 `httpx` 官方支持的 `httpx.MockTransport(custom_handler)`，自定义一个生成器函数按 Chunk 返回 SSE 文本。完全避开了 `vcrpy` 破坏 Socket 的缺陷。
@@ -241,7 +241,7 @@ class EvalConfig:
 
 ## 9. 轨迹指标体系、计算公式与数据血缘
 
-基于 `backend/agent.py`（WebAgent 逻辑）与 `backend/prompts.py`（Prompt 约束规则），构建针对性的轨迹评估指标体系。
+基于 `旧 AgentRunner 实现`（WebAgent 逻辑）与 `旧 AgentRunner 实现`（Prompt 约束规则），构建针对性的轨迹评估指标体系。
 
 ### 9.1 轨迹与工具调用质量 (Action Layer)
 
@@ -255,7 +255,7 @@ class EvalConfig:
   其中 $\text{Precision} = \frac{|T_{actual} \cap T_{expected}|}{|T_{actual}|}$，$\text{Recall} = \frac{|T_{actual} \cap T_{expected}|}{|T_{expected}|}$。
 
 #### 2. Sequential Constraint Violation Rate (顺序约束违反率)
-- **业务意义**：检查是否违反 `backend/prompts.py` 中的硬性规则：“永远不要连续执行两次提取”、“除非上下文中提供了 URL，否则始终从搜索开始”。
+- **业务意义**：检查是否违反 `旧 AgentRunner 实现` 中的硬性规则：“永远不要连续执行两次提取”、“除非上下文中提供了 URL，否则始终从搜索开始”。
 - **数据血缘 (Data Lineage)**：
   - 提取有序动作序列 $S = [a_1, a_2, \dots, a_k]$，其中 $a_i \in \{\text{Search}, \text{Extract}, \text{Crawl}\}$。
 - **计算公式**：
@@ -332,7 +332,7 @@ class EvalConfig:
 2. **DeepEval 自定义 Metric 与 Async Pytest 的性能开销**：
    - 评估全量 Golden Dataset（50 条样本）在并发运行 LLM-as-Judge 时的 API 耗时与 Rate Limit (TPM) 瓶颈。
 3. **OpenTelemetry Trace 导出器与 Langfuse/LangSmith 的标准化数据接口**：
-   - 验证 `backend/agent.py` 在不引入强依赖的前提下，通过标准的 OpenTelemetry Python SDK 将 Trajectory 导出至 Langfuse 自建节点的稳定性。
+   - 验证 `旧 AgentRunner 实现` 在不引入强依赖的前提下，通过标准的 OpenTelemetry Python SDK 将 Trajectory 导出至 Langfuse 自建节点的稳定性。
 
 ---
 

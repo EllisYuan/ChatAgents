@@ -10,7 +10,9 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _BACKEND_ROOT = Path(__file__).resolve().parents[3]
+_REPO_ROOT = _BACKEND_ROOT.parent
 _DEFAULT_ENDPOINTS_CONFIG_PATH = _BACKEND_ROOT / "config" / "endpoints.yaml"
+_DEFAULT_EVAL_REPORTS_DIR = _REPO_ROOT / ".eval-reports"
 
 
 class Settings(BaseSettings):
@@ -18,3 +20,4 @@ class Settings(BaseSettings):
 
     endpoints_config_path: Path = Field(default=_DEFAULT_ENDPOINTS_CONFIG_PATH)
     model_discovery_enabled: bool = True
+    eval_reports_dir: Path = Field(default=_DEFAULT_EVAL_REPORTS_DIR)

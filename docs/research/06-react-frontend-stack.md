@@ -105,7 +105,7 @@ FastAPI 后端通过 `/stream_agent` 接口输出 SSE (Server-Sent Events) 或 L
 | **Generic Chart (Recharts / Visx)** | 活跃 | MIT | 中。适合画整体趋势图，但不适合做树状 Span 折叠与卡片内瀑布图。 | 排除 |
 | **自研 Collapsible Span Tree / Waterfall (推荐)** | 完全自研 | MIT | **低 (约 150 行代码)**。基于 Radix UI Collapsible + Tailwind CSS，在聊天卡片下方渲染树状 Span 层级与时间线 Gantt 条。 | **推荐** |
 
-### 5.2 自研 Trace 组件设计规范 (符合 `streamlit_app.py` 既有逻辑映射)
+### 5.2 自研 Trace 组件设计规范 (符合 `frontend/src` 既有逻辑映射)
 将 `render_tool_call` 中的工具调用映射为 Trace 中的子 Span：
 - **Root Span**: LLM Agent 节点 (总耗时、总 Token、总 Cost)
 - **Child Span**: `TavilySearch` / `TavilyExtract` 等 Tool 执行，支持显示耗时百分比（Waterfall bar）、输入参数卡片、输出摘要及 JSON 展开。

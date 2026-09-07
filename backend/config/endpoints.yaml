@@ -11,7 +11,7 @@ endpoints:
     base_url: https://api.anthropic.com
     auth_field: x-api-key
     auth_secret_ref: ANTHROPIC_API_KEY
-    main_model: claude-sonnet-4-5-20250929
+    main_model: claude-sonnet-5
 
   - name: openai-official
     protocol: openai_responses

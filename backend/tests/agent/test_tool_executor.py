@@ -36,9 +36,10 @@ def test_execute_returns_model_text_on_success():
 
     executor = ToolExecutor({"fake_tool": _spec(handler)})
 
-    text = asyncio.run(executor.execute("fake_tool", {}, _ctx()))
+    text, structured = asyncio.run(executor.execute("fake_tool", {}, _ctx()))
 
     assert text == "成功"
+    assert structured == {"ok": True}
 
 
 def test_unregistered_tool_raises_program_error():
@@ -64,9 +65,10 @@ def test_non_retryable_external_failure_returns_text_without_raising():
 
     executor = ToolExecutor({"fake_tool": _spec(handler, retryable=True)})
 
-    text = asyncio.run(executor.execute("fake_tool", {}, _ctx()))
+    text, structured = asyncio.run(executor.execute("fake_tool", {}, _ctx()))
 
     assert text == "目标站拒绝"
+    assert structured is None
 
 
 def test_retryable_external_failure_retries_then_returns_text_to_model(monkeypatch):
@@ -81,10 +83,11 @@ def test_retryable_external_failure_retries_then_returns_text_to_model(monkeypat
     executor = ToolExecutor({"fake_tool": _spec(handler, retryable=True)})
     monkeypatch.setattr(asyncio, "sleep", lambda _seconds: _original_sleep(0))
 
-    text = asyncio.run(executor.execute("fake_tool", {}, _ctx()))
+    text, structured = asyncio.run(executor.execute("fake_tool", {}, _ctx()))
 
     assert len(attempts) == 3
     assert text == "第三次成功"
+    assert structured == {}
 
 
 def test_exhausting_retries_returns_last_failure_text(monkeypatch):
@@ -94,9 +97,10 @@ def test_exhausting_retries_returns_last_failure_text(monkeypatch):
     executor = ToolExecutor({"fake_tool": _spec(handler, retryable=True)})
     monkeypatch.setattr(asyncio, "sleep", lambda _seconds: _original_sleep(0))
 
-    text = asyncio.run(executor.execute("fake_tool", {}, _ctx()))
+    text, structured = asyncio.run(executor.execute("fake_tool", {}, _ctx()))
 
     assert text == "一直超时"
+    assert structured is None
 
 
 def test_non_retryable_spec_only_attempts_once():
@@ -120,9 +124,10 @@ def test_timeout_is_classified_as_retryable_external_failure():
 
     executor = ToolExecutor({"fake_tool": _spec(handler, retryable=False, timeout_s=0.01)})
 
-    text = asyncio.run(executor.execute("fake_tool", {}, _ctx()))
+    text, structured = asyncio.run(executor.execute("fake_tool", {}, _ctx()))
 
     assert "超时" in text
+    assert structured is None
 
 
 def test_tool_definitions_expose_only_name_description_parameters():

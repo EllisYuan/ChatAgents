@@ -69,3 +69,21 @@ def test_parameters_are_the_same_object_across_protocols() -> None:
 
 def test_empty_tool_list_serializes_to_empty_list() -> None:
     assert to_protocol_tools([], "anthropic_messages") == []
+
+
+def test_registry_dict_definitions_serialize_identically_to_objects() -> None:
+    """``tools.registry.tool_definitions()`` 产出的是字典，不是带属性的对象。
+
+    只认属性会在运行期炸 ``'dict' object has no attribute 'name'``——这是真实
+    故障：整条聊天链路每次运行都失败，而 ``Sequence[Any]`` 让 mypy 看不见。
+    """
+
+    tool = _tool()
+    as_dict = {
+        "name": tool.name,
+        "description": tool.description,
+        "parameters": tool.parameters,
+    }
+
+    for protocol in ("anthropic_messages", "openai_responses", "openai_chat_completions"):
+        assert to_protocol_tools([as_dict], protocol) == to_protocol_tools([tool], protocol)

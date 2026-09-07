@@ -31,7 +31,7 @@ from ..events import (
 )
 from ..message import ModelMessage, OpaqueBlock, TextBlock, ToolCallBlock, ToolResultBlock
 from ..profile import EndpointProfile
-from ..tool_schema import to_protocol_tools
+from ..tool_schema import ToolLike, to_protocol_tools
 
 _DEFAULT_MAX_TOKENS = 8192
 
@@ -67,17 +67,19 @@ def _serialize_message(message: ModelMessage) -> dict[str, Any]:
 def build_request(
     *,
     messages: Sequence[ModelMessage],
-    tools: Sequence[Any],
+    tools: Sequence[ToolLike],
     model: str,
     effort: EffortTier,
+    system_prompt: str | None = None,
 ) -> dict[str, Any]:
-    system_text = "\n\n".join(
+    stored_system_text = "\n\n".join(
         block.text
         for message in messages
         if message.role == "system"
         for block in message.content
         if isinstance(block, TextBlock)
     )
+    system_text = "\n\n".join(text for text in (system_prompt, stored_system_text) if text)
     payload: dict[str, Any] = {
         "model": model,
         "max_tokens": _DEFAULT_MAX_TOKENS,
@@ -141,7 +143,12 @@ class _Accumulator:
             state.name = cb.name
             self.blocks[raw_event.index] = state
             return [ToolCallStarted(id=cb.id, name=cb.name)]
-        if cb.type == "redacted_thinking":
+        if cb.type == "thinking":
+            # 某些上游会在 start 事件携带已有片段；它们与后续 delta 一样
+            # 都属于必须原样回传的 thinking block。
+            state.thinking_acc = getattr(cb, "thinking", "") or ""
+            state.signature_acc = getattr(cb, "signature", "") or ""
+        elif cb.type == "redacted_thinking":
             state.redacted_data = cb.data
         self.blocks[raw_event.index] = state
         return []
@@ -226,13 +233,20 @@ class AnthropicMessagesAdapter:
         self,
         *,
         messages: Sequence[ModelMessage],
-        tools: Sequence[Any],
+        tools: Sequence[ToolLike],
         model: str,
         effort: EffortTier,
         profile: EndpointProfile,
+        system_prompt: str | None = None,
     ) -> AsyncIterator[ModelEvent]:
         del profile  # 鉴权/base_url 已经在客户端构造时定死，这里不再用它
-        payload = build_request(messages=messages, tools=tools, model=model, effort=effort)
+        payload = build_request(
+            messages=messages,
+            tools=tools,
+            model=model,
+            effort=effort,
+            system_prompt=system_prompt,
+        )
         acc = _Accumulator()
         raw_stream = await self._client.messages.create(**payload)
         try:

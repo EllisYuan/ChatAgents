@@ -1,6 +1,6 @@
 # 模型清单是发现来的，不是配置来的
 
-现状把模型清单硬编码成 `backend/llm_config.py` 里的三个字典，代价已经兑现：`CLAUDE_MODELS["opus"]` 的值 `claude-opus-4-1-202508059` 日期段是 9 位、是个无效标识；`GROQ_MODELS` 整块被注释掉了而 `create_groq()` 仍在调它，一调必抛 `AttributeError`。而 `.get(model, 默认值)` 的写法让第一个错误静默回退，长期无人发现。
+旧实现把模型清单硬编码成三个字典，代价已经兑现：`CLAUDE_MODELS["opus"]` 的值 `claude-opus-4-1-202508059` 日期段是 9 位、是个无效标识；`GROQ_MODELS` 整块被注释掉了而 `create_groq()` 仍在调它，一调必抛 `AttributeError`。而 `.get(model, 默认值)` 的写法让第一个错误静默回退，长期无人发现。
 
 **决定：模型清单向端点档案实时发现，落库持久化，不硬编码任何清单——包括「兜底清单」。**
 

@@ -21,8 +21,11 @@ PARAMETERS: dict[str, Any] = {
         },
         "section": {
             "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "pattern": r"^[1-9][0-9]{0,3}(?:\s*,\s*[1-9][0-9]{0,3})*$",
             "description": (
-                '逗号分隔的章节编号，例如 "3,5"。'
+                '逗号分隔的正章节编号，例如 "3,5"。'
                 "只在此前收到过该 URL 的文档结构、需要索取具体章节时传入。"
             ),
         },

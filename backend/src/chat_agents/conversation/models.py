@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Any, cast
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ..db.app import Message as MessageRow
 from ..db.app import Session as SessionRow
@@ -20,11 +20,13 @@ from ..llm.message import (
     ContentBlock,
     ModelMessage,
     OpaqueBlock,
+    Role,
     TextBlock,
     ToolCallBlock,
     ToolResultBlock,
 )
 from ..llm.protocol import PROTOCOLS, Protocol
+from ..validation import MAX_MESSAGE_LENGTH, MAX_TITLE_LENGTH, validate_non_blank
 
 
 class SessionSummary(BaseModel):
@@ -66,12 +68,28 @@ class SessionDetail(SessionView):
 
 
 class RenameSessionRequest(BaseModel):
-    title: str | None = None
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = Field(default=None, max_length=MAX_TITLE_LENGTH)
+
+    @field_validator("title")
+    @classmethod
+    def _validate_title(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return validate_non_blank(value, field="title", max_length=MAX_TITLE_LENGTH).strip()
 
 
 class UserMessageRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     id: UUID
-    content: str
+    content: str = Field(min_length=1, max_length=MAX_MESSAGE_LENGTH)
+
+    @field_validator("content")
+    @classmethod
+    def _validate_content(cls, value: str) -> str:
+        return validate_non_blank(value, field="content", max_length=MAX_MESSAGE_LENGTH)
 
 
 def _encode_block(block: ContentBlock) -> dict[str, Any] | None:
@@ -106,7 +124,12 @@ def encode_content(message: ModelMessage) -> tuple[list[dict[str, Any]], list[di
         if encoded is not None:
             content.append(encoded)
         elif isinstance(block, OpaqueBlock):
-            opaque.append({"protocol": block.protocol, "data": block.data})
+            entry: dict[str, Any] = {"protocol": block.protocol, "data": block.data}
+            # 只有 opaque block 出现在普通内容之后时才记录位置；前置块继续使用
+            # 旧的紧凑形状，兼容已有消息行。
+            if content:
+                entry["content_index"] = len(content)
+            opaque.append(entry)
     return content, opaque
 
 
@@ -143,7 +166,7 @@ def decode_message(
     if role not in {"user", "assistant", "tool"}:
         raise ValueError(f"Stored conversation role is invalid: {role!r}")
 
-    blocks = [_decode_block(item) for item in content]
+    blocks: list[ContentBlock] = [_decode_block(item) for item in content]
     if include_round_trip and round_trip_payload:
         payloads: list[Mapping[str, Any]]
         if isinstance(round_trip_payload, list):
@@ -152,16 +175,38 @@ def decode_message(
             payloads = list(round_trip_payload["blocks"])
         else:
             payloads = [round_trip_payload]
-        opaque_blocks = []
+        opaque_blocks: list[tuple[int | None, OpaqueBlock]] = []
         for item in payloads:
             protocol = item["protocol"]
             if protocol not in PROTOCOLS:
                 raise ValueError(f"Unknown opaque block protocol: {protocol!r}")
+            position = item.get("content_index")
             opaque_blocks.append(
-                OpaqueBlock(protocol=cast(Protocol, protocol), data=dict(item["data"]))
+                (
+                    int(position) if position is not None else None,
+                    OpaqueBlock(protocol=cast(Protocol, protocol), data=dict(item["data"])),
+                )
             )
-        blocks = opaque_blocks + blocks
-    return ModelMessage(role=role, content=tuple(blocks))  # type: ignore[arg-type]
+        if any(position is not None for position, _ in opaque_blocks):
+            # 新记录带有普通内容之前的数量；没有位置的旧前置块仍放在最前面。
+            before = [opaque_block for position, opaque_block in opaque_blocks if position is None]
+            positioned = [
+                (position, opaque_block)
+                for position, opaque_block in opaque_blocks
+                if position is not None
+            ]
+            positioned_by_index: dict[int, list[OpaqueBlock]] = {}
+            for position, opaque_block in positioned:
+                positioned_by_index.setdefault(position, []).append(opaque_block)
+            merged: list[ContentBlock] = [*before]
+            for index, content_block in enumerate(blocks):
+                merged.extend(positioned_by_index.get(index, []))
+                merged.append(content_block)
+            merged.extend(positioned_by_index.get(len(blocks), []))
+            blocks = merged
+        else:
+            blocks = [block for _, block in opaque_blocks] + blocks
+    return ModelMessage(role=cast(Role, role), content=tuple(blocks))
 
 
 def row_to_model_message(row: MessageRow, *, include_round_trip: bool = True) -> ModelMessage:
@@ -174,8 +219,10 @@ def row_to_model_message(row: MessageRow, *, include_round_trip: bool = True) ->
 
 
 def row_to_view(row: MessageRow) -> MessageView:
-    return MessageView.model_validate(row)
+    view: MessageView = MessageView.model_validate(row)
+    return view
 
 
 def session_to_view(row: SessionRow) -> SessionView:
-    return SessionView.model_validate(row)
+    view: SessionView = SessionView.model_validate(row)
+    return view

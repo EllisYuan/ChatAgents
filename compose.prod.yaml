@@ -1,0 +1,8 @@
+services:
+  migrate:
+    image: ghcr.io/ellisyuan/chatagents-backend:${APP_VERSION:?APP_VERSION must be set}
+    build: !reset null
+
+  backend:
+    image: ghcr.io/ellisyuan/chatagents-backend:${APP_VERSION:?APP_VERSION must be set}
+    build: !reset null

@@ -9,8 +9,11 @@ from __future__ import annotations
 
 import asyncio
 import random
+from collections.abc import AsyncIterator, Sequence
+from dataclasses import dataclass
 from typing import Any
 
+from chat_agents.llm.message import ToolCallBlock
 from chat_agents.tools import ToolExternalFailure, ToolSpec
 from chat_agents.tools.registry import TOOL_SPECS, tool_definitions
 
@@ -18,6 +21,28 @@ from .tool_execution import RunToolContext
 
 MAX_ATTEMPTS_WHEN_RETRYABLE = 3
 BACKOFF_BASE_SECONDS = 0.5
+
+
+@dataclass(frozen=True, slots=True)
+class ToolCallStarted:
+    tool_call_id: str
+    name: str
+    arguments: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class ToolCallFinished:
+    """``structured`` 只在真正跑通时有值——耗尽重试的外部失败没有结构化结果
+    可言，如实传 ``None``（issue #69），不编一个假的。
+    """
+
+    tool_call_id: str
+    name: str
+    result: str
+    structured: dict[str, Any] | None
+
+
+ToolCallLifecycleEvent = ToolCallStarted | ToolCallFinished
 
 
 class ToolProgramError(RuntimeError):
@@ -43,15 +68,57 @@ class ToolExecutor:
             for s in self._specs.values()
         ]
 
+    def is_parallelizable(self, name: str) -> bool:
+        """未注册的工具名默认视为可并行——真正的「未注册」由 :meth:`execute` 报程序错误。"""
+        spec = self._specs.get(name)
+        return spec.parallelizable if spec is not None else True
+
+    async def run_calls(
+        self, calls: Sequence[ToolCallBlock], ctx: RunToolContext
+    ) -> AsyncIterator[ToolCallLifecycleEvent]:
+        """执行一次 ReAct 迭代里模型一并发起的多个工具调用，是发出工具事件的唯一入口
+        （ADR-0008：「跨度记录归执行器」在事件化之后依然成立，只是发的是事件不是跨度）。
+
+        可并行的（按 :meth:`is_parallelizable` 判定）真的并发跑，标了「不可并行」的
+        那些串行跑（ADR-0004）。调用方（``AgentRunner``）只管把这份事件翻译成运行
+        事件，不用知道并发编排怎么做的。
+        """
+        parallel_calls = [call for call in calls if self.is_parallelizable(call.name)]
+        serial_calls = [call for call in calls if not self.is_parallelizable(call.name)]
+
+        async def _run(call: ToolCallBlock) -> tuple[ToolCallBlock, str, dict[str, Any] | None]:
+            text, structured = await self.execute(call.name, call.arguments, ctx)
+            return call, text, structured
+
+        if parallel_calls:
+            for call in parallel_calls:
+                yield ToolCallStarted(
+                    tool_call_id=call.id, name=call.name, arguments=call.arguments
+                )
+            for call, text, structured in await asyncio.gather(
+                *(_run(call) for call in parallel_calls)
+            ):
+                yield ToolCallFinished(
+                    tool_call_id=call.id, name=call.name, result=text, structured=structured
+                )
+
+        for call in serial_calls:
+            yield ToolCallStarted(tool_call_id=call.id, name=call.name, arguments=call.arguments)
+            _, text, structured = await _run(call)
+            yield ToolCallFinished(
+                tool_call_id=call.id, name=call.name, result=text, structured=structured
+            )
+
     async def execute(
         self,
         name: str,
         arguments: dict[str, Any],
         ctx: RunToolContext,
-    ) -> str:
-        """执行一次工具调用，返回渲染给模型的文本。
+    ) -> tuple[str, dict[str, Any] | None]:
+        """执行一次工具调用，返回渲染给模型的文本与结构化结果。
 
-        外部失败（含重试耗尽）不抛异常，文本本身就是交回模型的结果。
+        外部失败（含重试耗尽）不抛异常，文本本身就是交回模型的结果，结构化
+        结果如实为 ``None``（issue #69：没有猜测出来的结构化数据）。
         程序错误抛出 :class:`ToolProgramError`，由调用方中止运行。
         """
         spec = self._specs.get(name)
@@ -82,10 +149,10 @@ class ToolExecutor:
                 raise ToolProgramError(f"{name} 执行失败: {exc}") from exc
             else:
                 span.finish_ok(result.structured)
-                return str(result.model_text)
+                return str(result.model_text), result.structured
 
             if attempt < attempts:
                 await asyncio.sleep(_backoff_seconds(attempt))
 
         assert last_failure is not None
-        return str(last_failure.model_text)
+        return str(last_failure.model_text), None

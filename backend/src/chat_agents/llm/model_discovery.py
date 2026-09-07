@@ -21,12 +21,17 @@ from urllib.parse import urlsplit, urlunsplit
 import httpx2
 
 from ..model_catalog import ModelCatalog, ModelCatalogStore, ModelItem
+from ..validation import validate_base_url, validate_model_identifier, validate_non_blank
 from .profile import EndpointProfile
 from .server_config import ServerEndpointsConfig, build_available_profiles
 
 MODEL_DISCOVERY_TIMEOUT_SECONDS = 5.0
 MODEL_DISCOVERY_INTERVAL_SECONDS = 24 * 60 * 60
 MODEL_DISCOVERY_ENABLED_ENV = "CHATAGENTS_MODEL_DISCOVERY_ENABLED"
+# Anthropic 要求每个请求都带这个头；官方 SDK 自己会带，清单请求是自己发的 HTTP。
+ANTHROPIC_VERSION = "2023-06-01"
+# 上游没给分组标签时的占位——只影响选单分组，不进模型标识。
+UNKNOWN_OWNER = "unknown"
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +52,7 @@ class ModelsHttpClient(Protocol):
 
 def models_url(base_url: str) -> str:
     """把端点档案规范化为 OpenAI 风格的 ``/v1/models`` URL。"""
+    validate_base_url(base_url)
     parts = urlsplit(base_url)
     path = parts.path.rstrip("/")
     path = f"{path}/models" if path == "/v1" or path.endswith("/v1") else f"{path}/v1/models"
@@ -67,15 +73,69 @@ def _parse_models(payload: Any) -> tuple[ModelItem, ...]:
             raise ValueError(f"模型清单 data[{index}] 必须是对象")
         model_id = raw_item.get("id")
         owned_by = raw_item.get("owned_by")
-        if not isinstance(model_id, str) or not model_id:
-            raise ValueError(f"模型清单 data[{index}] 缺少非空字符串 id")
-        if not isinstance(owned_by, str) or not owned_by:
-            raise ValueError(f"模型清单 data[{index}] 缺少非空字符串 owned_by")
+        if not isinstance(model_id, str):
+            raise ValueError(f"模型清单 data[{index}] 缺少字符串 id")
+        try:
+            model_id = validate_model_identifier(model_id)
+        except ValueError as exc:
+            raise ValueError(f"模型清单 data[{index}] 的 id 不合法：{exc}") from exc
+        # owned_by 只是选单的分组标签（前端 ModelPicker 按它分桶），不是标识的一部分。
+        # Anthropic 官方 /v1/models 整个响应都没有这个字段（2026-09-01 实测），
+        # 缺了就整份清单作废是拿一个显示细节否掉全部可寻址模型——按未知分组收下。
+        if owned_by is None:
+            owned_by = UNKNOWN_OWNER
+        elif not isinstance(owned_by, str):
+            raise ValueError(f"模型清单 data[{index}] 的 owned_by 必须是字符串")
+        else:
+            try:
+                validate_non_blank(owned_by, field="owned_by", max_length=256)
+            except ValueError as exc:
+                raise ValueError(f"模型清单 data[{index}] 的 owned_by 不合法：{exc}") from exc
         if model_id in seen:
             continue
         seen.add(model_id)
         result.append(ModelItem(model_id=model_id, owned_by=owned_by))
     return tuple(result)
+
+
+def _discovery_headers(profile: EndpointProfile) -> dict[str, str]:
+    """清单请求的鉴权头。
+
+    生成路径由官方 SDK 构造请求，这两件事 SDK 替我们做了；清单请求是自己发的
+    HTTP，得自己补上（2026-09-01 实测，两处缺失各让一个官方端点 4xx）：
+
+    - ``Authorization`` 要带 ``Bearer `` 前缀，否则 OpenAI 401；
+    - Anthropic 要求 ``anthropic-version``，缺了就 400。
+
+    档案自定义的鉴权头字段名照原样使用——``auth_field`` 是端点档案的属性
+    （ADR-0014），中转站可能约定别的头名，这里不替它做判断。
+    """
+
+    secret = profile.api_key.get_secret_value()
+    if profile.auth_field.lower() == "authorization" and not secret.lower().startswith("bearer "):
+        secret = f"Bearer {secret}"
+    headers = {profile.auth_field: secret}
+    if profile.protocol == "anthropic_messages":
+        headers["anthropic-version"] = ANTHROPIC_VERSION
+    return headers
+
+
+# 上游响应体截断长度——够看清是哪种错误（密钥/模型名/额度），不做无界拼接。
+MAX_RESPONSE_DETAIL_LENGTH = 500
+
+
+def _response_detail(response: Any) -> str:
+    """尽力取一段可读的上游响应体，取不到就返回空串（ADR-0015：错误原样透传）。"""
+    try:
+        text = getattr(response, "text", "")
+    except Exception:
+        return ""
+    if not isinstance(text, str):
+        return ""
+    text = text.strip()
+    if len(text) > MAX_RESPONSE_DETAIL_LENGTH:
+        text = f"{text[:MAX_RESPONSE_DETAIL_LENGTH]}…"
+    return text
 
 
 async def _get_models(
@@ -84,7 +144,7 @@ async def _get_models(
     http_client: ModelsHttpClient | None,
     timeout: float,  # noqa: ASYNC109 - forwarded to the HTTP client's total timeout
 ) -> tuple[ModelItem, ...]:
-    headers = {profile.auth_field: profile.api_key.get_secret_value()}
+    headers = _discovery_headers(profile)
     url = models_url(profile.base_url)
 
     if http_client is not None:
@@ -95,7 +155,11 @@ async def _get_models(
 
     status_code = getattr(response, "status_code", None)
     if not isinstance(status_code, int) or status_code < 200 or status_code >= 300:
-        raise ModelDiscoveryError("模型清单上游返回了非成功 HTTP 状态")
+        detail = _response_detail(response)
+        message = f"模型清单上游返回 HTTP {status_code}"
+        if detail:
+            message = f"{message}：{detail}"
+        raise ModelDiscoveryError(message)
 
     try:
         payload = response.json()
@@ -120,8 +184,9 @@ async def discover_openai_models(
     except ModelDiscoveryError:
         raise
     except Exception as exc:
-        # 不把 SDK/httpx 异常或请求头带出的内容传播到 API 与日志边界。
-        raise ModelDiscoveryError("模型清单上游不可达") from exc
+        # 按 ADR-0015「上游错误原样透传」：异常原文（连接失败、DNS、超时）交回用户，
+        # 让填错 URL/key 的人能照着原话去改，而不是猜一句「不可达」到底是哪种不可达。
+        raise ModelDiscoveryError(f"模型清单上游不可达：{exc}") from exc
 
 
 class InMemoryModelCatalogStore:
