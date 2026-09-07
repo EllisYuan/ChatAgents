@@ -83,6 +83,9 @@ async def observe(
     current_iteration_span_id: UUID | None = None
     title_span_open: UUID | None = None
     tool_spans_open: dict[str, UUID] = {}
+    # 开启时写下的工具属性（入参）——`close_span` 是整列替换而非 JSONB 合并，
+    # 而 `ToolFinished` 不带入参，闭合时必须从这里取回，否则入参被结果覆盖掉。
+    tool_attributes_open: dict[str, dict[str, Any]] = {}
     main_terminal = False
     main_status: Literal["completed", "failed"] = "completed"
     title_terminal = not expect_title
@@ -172,6 +175,11 @@ async def observe(
             elif isinstance(event, ToolStarted):
                 span_id = tool_span_id(run_id, event.tool_call_id)
                 tool_spans_open[event.tool_call_id] = span_id
+                attributes = {
+                    "tool_call_id": event.tool_call_id,
+                    "arguments": event.arguments,
+                }
+                tool_attributes_open[event.tool_call_id] = attributes
                 await writer.open_span(
                     span_id=span_id,
                     run_id=run_id,
@@ -180,16 +188,18 @@ async def observe(
                     kind="tool",
                     role=None,
                     model=None,
-                    attributes={
-                        "tool_call_id": event.tool_call_id,
-                        "arguments": event.arguments,
-                    },
+                    attributes=attributes,
                 )
 
             elif isinstance(event, ToolFinished):
                 closing_span_id = tool_spans_open.get(event.tool_call_id)
                 if closing_span_id is not None:
                     del tool_spans_open[event.tool_call_id]
+                    # 从开启时那份属性接着补，入参因此活过闭合时的整列替换。
+                    attributes = dict(tool_attributes_open.pop(event.tool_call_id, {}))
+                    attributes["tool_call_id"] = event.tool_call_id
+                    attributes["result"] = event.result
+                    attributes["structured"] = event.structured
                     # 只有真正跑通的工具调用才会产出 structured；耗尽重试的外部
                     # 失败恒为 None——status 由这条结构性事实判定，不是猜测。
                     await writer.close_span(
@@ -200,11 +210,7 @@ async def observe(
                         input_tokens=None,
                         output_tokens=None,
                         reasoning_tokens=None,
-                        attributes={
-                            "tool_call_id": event.tool_call_id,
-                            "result": event.result,
-                            "structured": event.structured,
-                        },
+                        attributes=attributes,
                     )
 
             elif isinstance(event, TitleGenerated):
@@ -242,6 +248,7 @@ async def observe(
                 for open_span_id in tool_spans_open.values():
                     await _close_partial_span(writer, span_id=open_span_id, run_id=run_id)
                 tool_spans_open.clear()
+                tool_attributes_open.clear()
                 if title_terminal:
                     await writer.finish_run(run_id=run_id, status="failed")
                     terminal = True
@@ -257,6 +264,7 @@ async def observe(
             for open_span_id in tool_spans_open.values():
                 await _close_partial_span(writer, span_id=open_span_id, run_id=run_id)
             tool_spans_open.clear()
+            tool_attributes_open.clear()
             await writer.finish_run(run_id=run_id, status="failed")
             terminal = True
         raise
@@ -269,4 +277,5 @@ async def observe(
             for open_span_id in tool_spans_open.values():
                 await _close_partial_span(writer, span_id=open_span_id, run_id=run_id)
             tool_spans_open.clear()
+            tool_attributes_open.clear()
             await writer.finish_run(run_id=run_id, status="aborted")
