@@ -25,9 +25,10 @@ from pydantic import SecretStr
 
 
 class FakeResponse:
-    def __init__(self, payload: Any, status_code: int = 200) -> None:
+    def __init__(self, payload: Any, status_code: int = 200, text: str = "") -> None:
         self._payload = payload
         self.status_code = status_code
+        self.text = text
 
     def json(self) -> Any:
         return self._payload
@@ -165,6 +166,20 @@ def test_discovery_reads_only_openai_id_and_owned_by() -> None:
     asyncio.run(scenario())
 
 
+def test_non_2xx_response_carries_status_and_body_to_the_caller() -> None:
+    """密钥/URL 填错时，用户得看到上游原话才能照着改（ADR-0015：原样透传）。"""
+
+    async def scenario() -> None:
+        client = FakeHttpClient(
+            FakeResponse({}, status_code=401, text='{"error":"Invalid API key"}')
+        )
+
+        with pytest.raises(ModelDiscoveryError, match=r"HTTP 401.*Invalid API key"):
+            await discover_openai_models(profile(), http_client=client)
+
+    asyncio.run(scenario())
+
+
 def test_discovery_rejects_malformed_model_entries() -> None:
     async def scenario() -> None:
         client = FakeHttpClient(FakeResponse({"data": [{"id": "bad-owner", "owned_by": 42}]}))
@@ -230,7 +245,7 @@ def test_preset_refresh_failure_keeps_old_catalog_and_marks_fallback() -> None:
         assert catalog.models == (ModelItem(model_id="old-model", owned_by="old-owner"),)
         assert catalog.source == "fallback"
         assert catalog.last_success_at == old_time
-        assert catalog.error == "模型清单上游不可达"
+        assert catalog.error == "模型清单上游不可达：upstream timed out"
         assert await store.load("preset") == (
             (ModelItem(model_id="old-model", owned_by="old-owner"),),
             old_time,

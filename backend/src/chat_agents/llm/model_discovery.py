@@ -120,6 +120,24 @@ def _discovery_headers(profile: EndpointProfile) -> dict[str, str]:
     return headers
 
 
+# 上游响应体截断长度——够看清是哪种错误（密钥/模型名/额度），不做无界拼接。
+MAX_RESPONSE_DETAIL_LENGTH = 500
+
+
+def _response_detail(response: Any) -> str:
+    """尽力取一段可读的上游响应体，取不到就返回空串（ADR-0015：错误原样透传）。"""
+    try:
+        text = getattr(response, "text", "")
+    except Exception:
+        return ""
+    if not isinstance(text, str):
+        return ""
+    text = text.strip()
+    if len(text) > MAX_RESPONSE_DETAIL_LENGTH:
+        text = f"{text[:MAX_RESPONSE_DETAIL_LENGTH]}…"
+    return text
+
+
 async def _get_models(
     profile: EndpointProfile,
     *,
@@ -137,7 +155,11 @@ async def _get_models(
 
     status_code = getattr(response, "status_code", None)
     if not isinstance(status_code, int) or status_code < 200 or status_code >= 300:
-        raise ModelDiscoveryError("模型清单上游返回了非成功 HTTP 状态")
+        detail = _response_detail(response)
+        message = f"模型清单上游返回 HTTP {status_code}"
+        if detail:
+            message = f"{message}：{detail}"
+        raise ModelDiscoveryError(message)
 
     try:
         payload = response.json()
@@ -162,8 +184,9 @@ async def discover_openai_models(
     except ModelDiscoveryError:
         raise
     except Exception as exc:
-        # 不把 SDK/httpx 异常或请求头带出的内容传播到 API 与日志边界。
-        raise ModelDiscoveryError("模型清单上游不可达") from exc
+        # 按 ADR-0015「上游错误原样透传」：异常原文（连接失败、DNS、超时）交回用户，
+        # 让填错 URL/key 的人能照着原话去改，而不是猜一句「不可达」到底是哪种不可达。
+        raise ModelDiscoveryError(f"模型清单上游不可达：{exc}") from exc
 
 
 class InMemoryModelCatalogStore:

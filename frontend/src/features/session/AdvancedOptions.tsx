@@ -220,7 +220,7 @@ export function AdvancedOptions({ disabled = false }: AdvancedOptionsProps) {
             {customCatalog && customCatalog.source === "fallback" && (
               <p className="advanced-hint advanced-hint--fallback">
                 <span className="fallback-badge">fallback</span>
-                清单获取失败，可手填标识，或点击「重新获取」
+                {customCatalog.error ? `清单获取失败：${customCatalog.error}` : "清单获取失败"}
               </p>
             )}
           </div>
@@ -235,7 +235,7 @@ export function AdvancedOptions({ disabled = false }: AdvancedOptionsProps) {
         <div className="advanced-degraded-notice">
           <p className="advanced-hint advanced-hint--fallback">
             <span className="fallback-badge">fallback</span>
-            模型清单为空，可手填标识
+            模型清单为空
           </p>
           <button
             type="button"
