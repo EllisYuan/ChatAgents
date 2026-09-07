@@ -44,17 +44,25 @@ class ModelItemView(BaseModel):
 
 
 class ModelProfileView(BaseModel):
-    """模型档案层状态；不可用不等于模型清单发现失败。
-
-    ``main_model`` / ``auxiliary_model`` 是 ``endpoints.yaml`` 里该档案的模型标识，
-    供前端预填输入框——让用户在高级选项里就看到「默认到底是什么」，而不是等到
-    trace 里才第一次见到它（issue #82）。它们是配置不是密钥，不涉及 ADR-0029。
-    不可用的档案两者都是 ``None``：连密钥都没配，谈不上会用哪个模型。
-    """
+    """模型档案层状态；不可用不等于模型清单发现失败。"""
 
     name: str
     status: Literal["available", "unavailable"]
     reason: str | None = None
+
+
+class ModelProfileChoice(ModelProfileView):
+    """档案枚举里的一项——档案层状态，加上它会用哪两个模型（issue #82）。
+
+    模型标识只在这个响应里出现，不加进 ``ModelProfileView``：清单响应里的那个
+    ``profile`` 字段答的是「这份档案能不能用」，模型标识对它是**结构性不存在**，
+    摆一个恒为 ``null`` 的字段会让读者以为「这次没取到、下次可能有」（ADR-0023）。
+
+    这里的两个字段则是「可能没有值」：``unavailable`` 的档案连密钥都没配，谈不上
+    会用哪个模型，此时为 ``None``——``status`` 就是它自己的可用性状态字段，不必再
+    配第二个。它们是 ``endpoints.yaml`` 里的配置不是密钥，不涉及 ADR-0029。
+    """
+
     main_model: str | None = None
     auxiliary_model: str | None = None
 
@@ -67,7 +75,7 @@ class ModelProfilesResponse(BaseModel):
     默认」这类猜测，而那与服务端的 ``default_profile`` 并无关系。
     """
 
-    profiles: list[ModelProfileView] = Field(default_factory=list)
+    profiles: list[ModelProfileChoice] = Field(default_factory=list)
     default_profile: str
 
 

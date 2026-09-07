@@ -112,13 +112,12 @@ def test_models_contract_distinguishes_unavailable_profile_from_empty_catalog(
         assert response.status_code == 200
         body = response.json()
         assert body["source"] == "fallback"
+        # 清单响应里的 profile 只答「这份档案能不能用」，模型标识对它是结构性不
+        # 存在，因此根本不出现（ADR-0023）——那两个字段只在档案枚举响应里有。
         assert body["profile"] == {
             "name": "anthropic-official",
             "status": "unavailable",
             "reason": "环境变量 ANTHROPIC_API_KEY 未设置",
-            # 不可用的档案不回显模型标识：连密钥都没配，谈不上会用哪个模型。
-            "main_model": None,
-            "auxiliary_model": None,
         }
         assert body["error"] is None
 

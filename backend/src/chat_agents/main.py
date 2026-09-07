@@ -33,6 +33,7 @@ from .agent.runner import AgentRunner
 from .api_models import (
     HealthResponse,
     ModelItemView,
+    ModelProfileChoice,
     ModelProfilesResponse,
     ModelProfileView,
     ModelRefreshRequest,
@@ -247,7 +248,7 @@ async def list_model_profiles() -> ModelProfilesResponse:
     return ModelProfilesResponse(
         default_profile=config.default_profile,
         profiles=[
-            ModelProfileView(
+            ModelProfileChoice(
                 name=name,
                 status="available",
                 main_model=config.profiles[name].main_model,
@@ -257,7 +258,7 @@ async def list_model_profiles() -> ModelProfilesResponse:
             if name in available
         ]
         + [
-            ModelProfileView(name=name, status="unavailable", reason=profile.reason)
+            ModelProfileChoice(name=name, status="unavailable", reason=profile.reason)
             for name, profile in unavailable.items()
         ],
     )
@@ -430,6 +431,7 @@ async def create_run(
                     trigger_message_id=user_message_id,
                     effort=request.effort,
                     protocol=resolved.profile.protocol,
+                    key_source=resolved.key_source,
                     auxiliary_model_source=resolved.auxiliary_model_source,
                     retention_window=projection.retention_window,
                     run_attributes=projection.attributes,

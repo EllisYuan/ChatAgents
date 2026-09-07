@@ -407,6 +407,44 @@ def test_no_span_attribute_ever_carries_the_user_key(monkeypatch: pytest.MonkeyP
     asyncio.run(scenario())
 
 
+@pytest.mark.db
+def test_key_source_is_recorded_on_spans(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ADR-0029：密钥来源是观测事实，记进跨度属性——记的是来源，不是密钥本身。"""
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "server-key")
+
+    async def scenario() -> None:
+        async with migrated_engine("chat_agents_main_key_source") as engine:
+            factory = session_factory_for(engine)
+            monkeypatch.setattr(main_module, "get_session_factory", lambda: factory)
+
+            await _run(
+                _ScriptedPort([[_completed("标题")], [_completed("你好")]]),
+                {"session_id": str(uuid4()), "message": "嗨"},
+            )
+            await _run(
+                _ScriptedPort([[_completed("标题")], [_completed("你好")]]),
+                {
+                    "session_id": str(uuid4()),
+                    "message": "嗨",
+                    "model_override": {
+                        "base_url": "https://relay.example.com/v1",
+                        "api_key": "sk-user",
+                        "main_model": "gpt-luna",
+                    },
+                },
+            )
+
+            async with factory() as session:
+                spans = (await session.execute(select(Span))).scalars().all()
+                assert {span.attributes["key_source"] for span in spans} == {
+                    "server_default",
+                    "user_provided",
+                }
+
+    asyncio.run(scenario())
+
+
 def test_post_api_runs_rejects_an_incomplete_custom_endpoint() -> None:
     """自定义端点缺密钥是 400 而不是静默忽略——静默忽略正是本票要修的失效。"""
 

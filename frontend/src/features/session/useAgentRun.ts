@@ -72,16 +72,32 @@ export function useAgentRun(sessionId: string) {
         return;
       }
 
+      // 覆盖在按下发送这一刻取快照——这一轮用的就是当时选中的那个模型，运行途中
+      // 再改高级选项不影响它（issue #82：覆盖是运行级的，服务端不存任何选择状态）。
+      const decision = buildModelOverride(useModelOptionsStore.getState());
+
       const assistantId = crypto.randomUUID();
       setMessages((prev) => [
         ...prev,
         { id: crypto.randomUUID(), role: "user", text: trimmed, seq: null },
         { id: assistantId, role: "assistant", text: "", seq: null },
       ]);
-      setPhase("streaming");
-      setStreamingId(assistantId);
       setActiveTool(null);
       setErrors((prev) => omit(prev, assistantId));
+
+      if (decision.kind === "incomplete") {
+        // 用户选了自定义端点却没填完就发——不能静默改用服务端预设跑一轮
+        // （ADR-0014：模型由用户选定，系统永不代选）。这一轮就此打住，错误行挂在
+        // 刚落地的那条助手消息上说明还差什么；不进 streaming，也不碰后端。
+        setErrors((prev) => ({
+          ...prev,
+          [assistantId]: `自定义端点还差：${decision.missing}`,
+        }));
+        return;
+      }
+
+      setPhase("streaming");
+      setStreamingId(assistantId);
       startTrace(assistantId);
 
       // 会话随第一条用户消息诞生（ADR-0013）：这里让侧边栏立刻看到这一行，
@@ -98,17 +114,13 @@ export function useAgentRun(sessionId: string) {
       let failed = false;
       const startedAt = performance.now();
 
-      // 覆盖在按下发送这一刻取快照——这一轮用的就是当时选中的那个模型，运行途中
-      // 再改高级选项不影响它（issue #82：覆盖是运行级的，服务端不存任何选择状态）。
-      const modelOverride = buildModelOverride(useModelOptionsStore.getState());
-
       try {
         await streamRun(
           {
             session_id: sessionId,
             message: trimmed,
             effort,
-            ...(modelOverride ? { model_override: modelOverride } : {}),
+            ...(decision.kind === "override" ? { model_override: decision.override } : {}),
           },
           {
             onTextDelta(delta) {

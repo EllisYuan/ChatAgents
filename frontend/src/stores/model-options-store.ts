@@ -114,31 +114,52 @@ export const useModelOptionsStore = create<ModelOptionsState>((set) => ({
 }));
 
 /**
- * 把当前选择压成 `POST /api/runs` 的 `model_override`——**只在偏离默认时**产出，
- * 未偏离返回 `null`（issue #82）。
+ * 「这一轮该发什么覆盖」的三种结局。
+ *
+ * `incomplete` 与 `none` 必须分开：两者都没有可发的覆盖对象，但前者是**用户想
+ * 偏离却还没填完**，后者是**用户本来就没想偏离**。混成一个 `null` 会让前者被当
+ * 成后者，那一轮就静默改用服务端预设跑掉了——正是 ADR-0014「系统永不代选」要
+ * 禁的事，也正是 issue #82 报告的那个失效的形状。
+ */
+export type ModelOverrideDecision =
+  | { kind: "none" }
+  | { kind: "override"; override: ModelOverride }
+  | { kind: "incomplete"; missing: string };
+
+/**
+ * 把当前选择压成 `POST /api/runs` 的 `model_override`——**只在偏离默认时**产出
+ * （issue #82）。
  *
  * 不「总是传一份」的理由是前端并不可靠地知道服务端默认是什么：它拿到的预填值是
- * 请求档案枚举那一刻的快照，站长改完 `endpoints.yaml` 重启后就旧了。让 `null`
+ * 请求档案枚举那一刻的快照，站长改完 `endpoints.yaml` 重启后就旧了。不传该字段
  * 表示「用你的预设」，服务端读到的就永远是它自己当下那份配置。
  */
-export function buildModelOverride(state: ModelOptionsState): ModelOverride | null {
+export function buildModelOverride(state: ModelOptionsState): ModelOverrideDecision {
   const main = state.mainModel.trim();
   const auxiliary = state.auxiliaryModel.trim();
 
   if (state.profileChoice === CUSTOM_PROFILE) {
     const baseUrl = state.custom.baseUrl.trim();
-    // 四件套没填齐就不构造——后端会拒，而在这里停住能让用户对着自己那几个框
-    // 看出还差什么，不必从一句请求校验失败往回推。
-    if (!baseUrl || !state.custom.apiKey.trim() || !main) {
-      return null;
+    // 自定义端点四件套缺一不可。这里不能回落成「不传覆盖」——用户明确选了自定义
+    // 端点，静默改用服务端的档案与密钥跑一轮，他会以为自己的中转站正在工作。
+    const missing = [
+      baseUrl ? null : "base URL",
+      state.custom.apiKey.trim() ? null : "密钥",
+      main ? null : "main 模型标识",
+    ].filter((field): field is string => field !== null);
+    if (missing.length > 0) {
+      return { kind: "incomplete", missing: missing.join("、") };
     }
     return {
-      protocol: state.custom.protocol,
-      base_url: baseUrl,
-      auth_field: state.custom.authField.trim() || "Authorization",
-      api_key: state.custom.apiKey,
-      main_model: main,
-      auxiliary_model: auxiliary && auxiliary !== main ? auxiliary : null,
+      kind: "override",
+      override: {
+        protocol: state.custom.protocol,
+        base_url: baseUrl,
+        auth_field: state.custom.authField.trim() || "Authorization",
+        api_key: state.custom.apiKey,
+        main_model: main,
+        auxiliary_model: auxiliary && auxiliary !== main ? auxiliary : null,
+      },
     };
   }
 
@@ -154,5 +175,5 @@ export function buildModelOverride(state: ModelOptionsState): ModelOverride | nu
   if (auxiliary && !state.auxiliaryFollowsMain && auxiliary !== main) {
     override.auxiliary_model = auxiliary;
   }
-  return Object.keys(override).length > 0 ? override : null;
+  return Object.keys(override).length > 0 ? { kind: "override", override } : { kind: "none" };
 }

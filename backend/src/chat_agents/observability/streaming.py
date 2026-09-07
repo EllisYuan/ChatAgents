@@ -27,7 +27,7 @@ from ..agent.events import (
     title_span_id,
     tool_span_id,
 )
-from ..llm.resolve import AuxiliaryModelSource
+from ..llm.resolve import AuxiliaryModelSource, KeySource
 from .reasoning import reasoning_attributes
 from .writer import RunWriter
 
@@ -65,6 +65,7 @@ async def observe(
     effort: str | None,
     role: Literal["main"] = "main",
     protocol: str | None = None,
+    key_source: KeySource | None = None,
     auxiliary_model_source: AuxiliaryModelSource | None = None,
     retention_window: int | None = None,
     run_attributes: dict[str, Any] | None = None,
@@ -95,6 +96,11 @@ async def observe(
     terminal = False
     main_attributes: dict[str, Any] = {"protocol": protocol} if protocol is not None else {}
     title_attributes: dict[str, Any] = {"protocol": protocol} if protocol is not None else {}
+    if key_source is not None:
+        # ADR-0029：密钥来源是观测事实，值得记，只是没有 UI 读它——成本归属需要
+        # 时从跨度里按它分组查得出来。记的是来源，不是密钥本身。
+        main_attributes["key_source"] = key_source
+        title_attributes["key_source"] = key_source
     if auxiliary_model_source is not None:
         # ADR-0014：auxiliary 回落必须留痕。用户填了一个不存在的标识时回落是静默
         # 发生的，不记下来他会以为用的就是自己填的那个。
