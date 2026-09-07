@@ -35,6 +35,6 @@ COPY --from=build /app/backend/alembic /app/alembic
 COPY --from=build /app/backend/alembic.ini /app/alembic.ini
 COPY --from=build /app/backend/config /app/config
 
-EXPOSE 8080
+EXPOSE 8000
 
-CMD ["python", "-m", "uvicorn", "chat_agents.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["python", "-m", "uvicorn", "chat_agents.main:app", "--host", "0.0.0.0", "--port", "8000"]

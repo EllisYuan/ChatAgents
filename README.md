@@ -341,18 +341,18 @@ uv run --project backend python scripts/dev.py serve
 uv run --project backend python scripts/dev.py web
 ```
 
-两条命令分别等价于下面这两句；`--port 8080` 不能省——省掉会退到 uvicorn 默认的
-8000，而前端代理仍打 8080，届时每个 `/api` 请求都会收到代理自造的 500 空响应：
+两条命令分别等价于下面这两句；`--port 8000` 建议显式写出——它现在恰好等于
+uvicorn 的默认端口，但显式写明能防止端口再次漂移：
 
 ```bash
-uv run --project backend python -m uvicorn chat_agents.main:app --app-dir backend/src --reload --port 8080
+uv run --project backend python -m uvicorn chat_agents.main:app --app-dir backend/src --reload --port 8000
 npm --prefix frontend run dev
 ```
 
 | 入口 | 地址 |
 |---|---|
 | 前端 | http://localhost:5173 |
-| 后端（本地直起） | http://localhost:8080 |
+| 后端（本地直起） | http://localhost:8000 |
 | 后端（容器映射） | http://127.0.0.1:19180 |
 | OpenAPI 文档 | `<后端地址>/docs` |
 
@@ -431,7 +431,7 @@ endpoints:
                                                                        ▼
                                           ┌──────────────────────────────────┐
                                           │  backend 容器（ghcr.io 镜像）    │
-                                          │  uvicorn :8080                   │
+                                          │  uvicorn :8000                   │
                                           └──────────────┬───────────────────┘
                                                          │ backend-network
                                           ┌──────────────▼───────────────────┐

@@ -361,19 +361,19 @@ uv run --project backend python scripts/dev.py serve
 uv run --project backend python scripts/dev.py web
 ```
 
-These are equivalent to the two commands below. `--port 8080` is not optional —
-omitting it falls back to uvicorn's default 8000 while the frontend proxy still
-targets 8080, so every `/api` request gets an empty 500 minted by the proxy:
+These are equivalent to the two commands below. Passing `--port 8000` explicitly
+is still recommended — it happens to match uvicorn's own default now, but
+spelling it out guards against the port drifting again:
 
 ```bash
-uv run --project backend python -m uvicorn chat_agents.main:app --app-dir backend/src --reload --port 8080
+uv run --project backend python -m uvicorn chat_agents.main:app --app-dir backend/src --reload --port 8000
 npm --prefix frontend run dev
 ```
 
 | Entry point | Address |
 |---|---|
 | Frontend | http://localhost:5173 |
-| Backend (run directly) | http://localhost:8080 |
+| Backend (run directly) | http://localhost:8000 |
 | Backend (container port mapping) | http://127.0.0.1:19180 |
 | OpenAPI docs | `<backend address>/docs` |
 
@@ -454,7 +454,7 @@ Browser ─ HTTPS ──▶ │                                               �
                                                                        ▼
                                           ┌──────────────────────────────────┐
                                           │  backend container (ghcr.io)     │
-                                          │  uvicorn :8080                   │
+                                          │  uvicorn :8000                   │
                                           └──────────────┬───────────────────┘
                                                          │ backend-network
                                           ┌──────────────▼───────────────────┐

@@ -15,8 +15,8 @@ ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = ROOT / "frontend"
 
 # 后端监听端口。容器内（Dockerfile）、compose 映射的容器侧、前端 dev 代理默认值
-# 都是它——本地直起漏掉 --port 会退到 uvicorn 默认的 8000，前端代理随即 500。
-BACKEND_PORT = "8080"
+# 都是它，且与 uvicorn 自身的默认端口一致——即便忘了 --port 也不会错配。
+BACKEND_PORT = "8000"
 
 
 def executable(name: str) -> str:
