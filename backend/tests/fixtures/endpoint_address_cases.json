@@ -1,0 +1,52 @@
+[
+  {"mode": "auto", "protocol": "openai_responses", "path": "", "generation": "/v1/responses", "discovery": "/v1/models"},
+  {"mode": "auto", "protocol": "openai_chat_completions", "path": "", "generation": "/v1/chat/completions", "discovery": "/v1/models"},
+  {"mode": "auto", "protocol": "anthropic_messages", "path": "", "generation": "/v1/messages", "discovery": "/v1/models"},
+
+  {"mode": "auto", "protocol": "openai_responses", "path": "/", "generation": "/v1/responses", "discovery": "/v1/models"},
+  {"mode": "auto", "protocol": "openai_chat_completions", "path": "/", "generation": "/v1/chat/completions", "discovery": "/v1/models"},
+  {"mode": "auto", "protocol": "anthropic_messages", "path": "/", "generation": "/v1/messages", "discovery": "/v1/models"},
+
+  {"mode": "auto", "protocol": "openai_responses", "path": "/v1", "generation": "/v1/responses", "discovery": "/v1/models"},
+  {"mode": "auto", "protocol": "openai_chat_completions", "path": "/v1", "generation": "/v1/chat/completions", "discovery": "/v1/models"},
+  {"mode": "auto", "protocol": "anthropic_messages", "path": "/v1", "generation": "/v1/messages", "discovery": "/v1/models"},
+
+  {"mode": "auto", "protocol": "openai_responses", "path": "/v1/", "generation": "/v1/responses", "discovery": "/v1/models"},
+  {"mode": "auto", "protocol": "anthropic_messages", "path": "/v1/", "generation": "/v1/messages", "discovery": "/v1/models"},
+
+  {"mode": "auto", "protocol": "openai_responses", "path": "/gateway/v1", "generation": "/gateway/v1/responses", "discovery": "/gateway/v1/models"},
+  {"mode": "auto", "protocol": "openai_chat_completions", "path": "/gateway/v1", "generation": "/gateway/v1/chat/completions", "discovery": "/gateway/v1/models"},
+  {"mode": "auto", "protocol": "anthropic_messages", "path": "/gateway/v1", "generation": "/gateway/v1/messages", "discovery": "/gateway/v1/models"},
+
+  {"mode": "auto", "protocol": "openai_responses", "path": "/compatible", "generation": "/compatible/responses", "discovery": "/compatible/models"},
+  {"mode": "auto", "protocol": "openai_chat_completions", "path": "/compatible", "generation": "/compatible/chat/completions", "discovery": "/compatible/models"},
+  {"mode": "auto", "protocol": "anthropic_messages", "path": "/compatible", "generation": "/compatible/messages", "discovery": "/compatible/models"},
+
+  {"mode": "auto", "protocol": "openai_responses", "path": "/compatible//", "generation": "/compatible//responses", "discovery": "/compatible//models"},
+  {"mode": "auto", "protocol": "openai_responses", "path": "/compatible/%2e%2e/v1", "generation": "/compatible/%2e%2e/v1/responses", "discovery": "/compatible/%2e%2e/v1/models"},
+  {"mode": "auto", "protocol": "anthropic_messages", "path": "/compatible/%2e%2e/v1", "generation": "/compatible/%2e%2e/v1/messages", "discovery": "/compatible/%2e%2e/v1/models"},
+
+  {"mode": "full", "protocol": "openai_responses", "path": "/v1/responses", "generation": "/v1/responses", "discovery": "/v1/models"},
+  {"mode": "full", "protocol": "openai_chat_completions", "path": "/v1/chat/completions", "generation": "/v1/chat/completions", "discovery": "/v1/models"},
+  {"mode": "full", "protocol": "anthropic_messages", "path": "/v1/messages", "generation": "/v1/messages", "discovery": "/v1/models"},
+
+  {"mode": "full", "protocol": "openai_responses", "path": "/gateway/v1/responses", "generation": "/gateway/v1/responses", "discovery": "/gateway/v1/models"},
+  {"mode": "full", "protocol": "openai_chat_completions", "path": "/gateway/v1/chat/completions", "generation": "/gateway/v1/chat/completions", "discovery": "/gateway/v1/models"},
+  {"mode": "full", "protocol": "anthropic_messages", "path": "/gateway/v1/messages", "generation": "/gateway/v1/messages", "discovery": "/gateway/v1/models"},
+
+  {"mode": "full", "protocol": "openai_responses", "path": "/v1/responses/", "generation": "/v1/responses/", "discovery": "/v1/models"},
+  {"mode": "full", "protocol": "anthropic_messages", "path": "/messages", "generation": "/messages", "discovery": "/models"},
+
+  {"mode": "full", "protocol": "openai_responses", "path": "/custom/infer", "generation": "/custom/infer", "discovery": null},
+  {"mode": "full", "protocol": "openai_chat_completions", "path": "/custom/infer", "generation": "/custom/infer", "discovery": null},
+  {"mode": "full", "protocol": "anthropic_messages", "path": "/custom/infer", "generation": "/custom/infer", "discovery": null},
+  {"mode": "full", "protocol": "openai_responses", "path": "", "generation": "/", "discovery": null},
+  {"mode": "full", "protocol": "openai_responses", "path": "/v1/messages", "generation": "/v1/messages", "discovery": null},
+  {"mode": "full", "protocol": "anthropic_messages", "path": "/v1/responses", "generation": "/v1/responses", "discovery": null},
+
+  {"mode": "sdk_native", "protocol": "openai_responses", "path": "/v1", "generation": "/v1/responses", "discovery": "/v1/models"},
+  {"mode": "sdk_native", "protocol": "openai_chat_completions", "path": "/v1", "generation": "/v1/chat/completions", "discovery": "/v1/models"},
+  {"mode": "sdk_native", "protocol": "anthropic_messages", "path": "", "generation": "/v1/messages", "discovery": "/v1/models"},
+  {"mode": "sdk_native", "protocol": "openai_responses", "path": "/compatible", "generation": "/compatible/responses", "discovery": "/compatible/models"},
+  {"mode": "sdk_native", "protocol": "anthropic_messages", "path": "/compatible", "generation": "/compatible/v1/messages", "discovery": "/compatible/v1/models"}
+]

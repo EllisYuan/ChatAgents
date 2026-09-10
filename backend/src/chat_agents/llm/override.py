@@ -23,6 +23,7 @@ from ..validation import (
     validate_identifier,
     validate_model_identifier,
 )
+from .endpoint_address import AddressMode
 from .protocol import Protocol
 
 
@@ -34,6 +35,9 @@ class ModelOverride(BaseModel):
     endpoint_profile: str | None = Field(default=None, max_length=MAX_PROFILE_NAME_LENGTH)
     protocol: Protocol | None = None
     base_url: str | None = Field(default=None, max_length=MAX_BASE_URL_LENGTH)
+    # 省略即 `auto`：根地址自动补 `/v1`，已有 path 当作 API 前缀。`True` 表示
+    # `base_url` 就是最终生成 URL（issue #83）。
+    full_url: bool | None = None
     auth_field: str | None = Field(default=None, max_length=MAX_AUTH_FIELD_LENGTH)
     api_key: SecretStr | None = None
     main_model: str | None = Field(default=None, max_length=MAX_MODEL_IDENTIFIER_LENGTH)
@@ -44,6 +48,12 @@ class ModelOverride(BaseModel):
         """端点来源的判别式——与 `ModelRefreshRequest` 用的是同一条。"""
 
         return self.base_url is not None
+
+    @property
+    def address_mode(self) -> AddressMode:
+        """自定义端点的地址解释；服务端预设不走这里（仍是 `sdk_native`）。"""
+
+        return "full" if self.full_url else "auto"
 
     @field_validator("endpoint_profile")
     @classmethod
@@ -100,7 +110,7 @@ class ModelOverride(BaseModel):
         """
 
         if self.base_url is None:
-            for field in ("protocol", "auth_field", "api_key"):
+            for field in ("protocol", "auth_field", "api_key", "full_url"):
                 if getattr(self, field) is not None:
                     raise ValueError(f"{field} 只能和 base_url 一起使用")
             return self

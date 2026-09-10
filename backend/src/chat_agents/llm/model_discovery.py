@@ -1,7 +1,7 @@
 """运行时发现端点可寻址模型清单（ADR-0016）。
 
 模型发现是独立于 ``ModelPort.stream`` 的能力：生成协议可以是三者之一，清单
-始终只读取 OpenAI 格式的 ``/v1/models``，只消费 ``id`` 与 ``owned_by``。
+始终只读取 OpenAI 格式清单，只消费 ``id`` 与 ``owned_by``；路径遵循所选协议的 SDK base。
 
 ``DiscoveredModel`` 表是发现任务的写入边界，不是业务 CRUD 资源。服务端预设
 由自动发现写入；用户自定义端点只返回本次结果，永不经过 store。
@@ -16,13 +16,18 @@ from collections.abc import Mapping
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any, Protocol
-from urllib.parse import urlsplit, urlunsplit
 
 import httpx2
 
 from ..model_catalog import ModelCatalog, ModelCatalogStore, ModelItem
-from ..validation import validate_base_url, validate_model_identifier, validate_non_blank
+from ..validation import validate_model_identifier, validate_non_blank
+from .endpoint_address import (
+    DISCOVERY_UNAVAILABLE_REASON,
+    AddressMode,
+    resolve_endpoint_address,
+)
 from .profile import EndpointProfile
+from .protocol import Protocol as LlmProtocol
 from .server_config import ServerEndpointsConfig, build_available_profiles
 
 MODEL_DISCOVERY_TIMEOUT_SECONDS = 5.0
@@ -50,13 +55,19 @@ class ModelsHttpClient(Protocol):
     ) -> Any: ...
 
 
-def models_url(base_url: str) -> str:
-    """把端点档案规范化为 OpenAI 风格的 ``/v1/models`` URL。"""
-    validate_base_url(base_url)
-    parts = urlsplit(base_url)
-    path = parts.path.rstrip("/")
-    path = f"{path}/models" if path == "/v1" or path.endswith("/v1") else f"{path}/v1/models"
-    return urlunsplit((parts.scheme, parts.netloc, path, "", ""))
+def models_url(base_url: str, *, protocol: LlmProtocol, mode: AddressMode = "sdk_native") -> str:
+    """清单 URL——与生成同出一次解析（``endpoint_address``），不另立拼接规则。
+
+    完整 URL 模式下清单地址可能压根推不出来，那时 ``ModelDiscoveryError`` 是唯一
+    诚实的回答：随便挑一个路径试探，等于用一次猜测冒充用户的配置。
+    """
+
+    resolved = resolve_endpoint_address(base_url, protocol=protocol, mode=mode)
+    if resolved.discovery_url is None:
+        raise ModelDiscoveryError(
+            resolved.discovery_unavailable_reason or DISCOVERY_UNAVAILABLE_REASON
+        )
+    return resolved.discovery_url
 
 
 def _parse_models(payload: Any) -> tuple[ModelItem, ...]:
@@ -144,8 +155,9 @@ async def _get_models(
     http_client: ModelsHttpClient | None,
     timeout: float,  # noqa: ASYNC109 - forwarded to the HTTP client's total timeout
 ) -> tuple[ModelItem, ...]:
+    # URL 先解析：完整 URL 推不出清单地址时在这里就抛，一个 HTTP 请求都不发。
+    url = models_url(profile.base_url, protocol=profile.protocol, mode=profile.address_mode)
     headers = _discovery_headers(profile)
-    url = models_url(profile.base_url)
 
     if http_client is not None:
         response = await http_client.get(url, headers=headers, timeout=timeout)

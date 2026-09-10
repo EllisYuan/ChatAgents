@@ -112,6 +112,14 @@ def test_structural_errors_raise_config_error(tmp_path: Path, broken_yaml: str) 
         load_server_endpoints(_write(tmp_path, broken_yaml))
 
 
+@pytest.mark.parametrize("suffix", ["?token=private-marker", "#private-marker", "?", "#"])
+def test_base_url_rejects_query_and_fragment_in_server_config(tmp_path: Path, suffix: str) -> None:
+    config = VALID_YAML.replace("https://api.anthropic.com", "https://api.anthropic.com" + suffix)
+    with pytest.raises(ConfigError, match=r"query.*fragment") as error:
+        load_server_endpoints(_write(tmp_path, config))
+    assert "private-marker" not in str(error.value)
+
+
 def test_missing_file_raises_config_error(tmp_path: Path) -> None:
     with pytest.raises(ConfigError):
         load_server_endpoints(tmp_path / "does-not-exist.yaml")

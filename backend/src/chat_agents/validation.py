@@ -54,6 +54,8 @@ def validate_base_url(value: str, *, field: str = "base_url") -> str:
         raise ValueError(f"{field} 必须是带 host 的 http 或 https URL")
     if parsed.username is not None or parsed.password is not None:
         raise ValueError(f"{field} 不能包含用户凭据")
+    if "?" in value or "#" in value:
+        raise ValueError(f"{field} 是 SDK API base，不能包含 query 或 fragment")
     return value
 
 

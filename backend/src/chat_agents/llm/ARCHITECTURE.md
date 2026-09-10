@@ -27,6 +27,8 @@
 5. 上游错误原样透传，不映射为项目错误码。
 6. 用量只有 `complete` / `partial` / `unavailable` 三态，缺失不以 0 表示。
 7. 回放录制 `ModelEvent`，不录 HTTP 帧和鉴权信息。
+8. 地址只有一处解释：`endpoint_address.py`，发现与生成共用它的结果，任何一方不得另写拼接规则。自定义端点二选一——`auto`（地址是服务前缀，只有根地址补 `v1`）或 `full`（地址就是最终生成 URL，一律不追加；清单推不出来就如实报，不试探）；服务端预设仍是 `sdk_native`。地址不接受 query / fragment 与凭据。
+9. `full` 靠 HTTP 客户端的 async request 钩子改写 SDK 那一个生成 POST，不改 body 与鉴权，也不进共享客户端缓存。
 
 ## 决策来源
 

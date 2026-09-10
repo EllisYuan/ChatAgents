@@ -21,6 +21,7 @@ from chat_agents.llm.model_discovery import (
     periodic_model_refresh,
 )
 from chat_agents.llm.profile import EndpointProfile
+from chat_agents.llm.protocol import Protocol
 from pydantic import SecretStr
 
 
@@ -130,9 +131,34 @@ def test_anthropic_profile_carries_the_required_version_header() -> None:
     asyncio.run(scenario())
 
 
-def test_models_url_supports_bases_with_or_without_v1_suffix() -> None:
-    assert models_url("https://relay.example.com") == "https://relay.example.com/v1/models"
-    assert models_url("https://relay.example.com/v1/") == "https://relay.example.com/v1/models"
+@pytest.mark.parametrize(
+    ("protocol", "suffix"),
+    [
+        ("openai_chat_completions", "models"),
+        ("openai_responses", "models"),
+        ("anthropic_messages", "v1/models"),
+    ],
+)
+@pytest.mark.parametrize(
+    ("path", "prefix"),
+    [
+        ("", "/"),
+        ("/v1", "/v1/"),
+        ("/v1/", "/v1/"),
+        ("/gateway/v1", "/gateway/v1/"),
+        ("/compatible", "/compatible/"),
+        ("/compatible//", "/compatible//"),
+    ],
+)
+def test_models_url_preserves_the_sdk_base(
+    protocol: Protocol,
+    suffix: str,
+    path: str,
+    prefix: str,
+) -> None:
+    assert models_url("https://relay.example.com" + path, protocol=protocol) == (
+        "https://relay.example.com" + prefix + suffix
+    )
 
 
 def test_discovery_reads_only_openai_id_and_owned_by() -> None:

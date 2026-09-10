@@ -51,6 +51,9 @@ def resolve_profiles(
             base_url=override.base_url,
             auth_field=override.auth_field or "Authorization",
             api_key=override.api_key,
+            # 自定义端点必须显式给出模式：`sdk_native` 那个默认值属于服务端预设，
+            # 让它漏进来就等于用户填的地址被按另一套规则解释（issue #83）。
+            address_mode=override.address_mode,
         )
         main_model = override.main_model
         auxiliary_requested = override.auxiliary_model
