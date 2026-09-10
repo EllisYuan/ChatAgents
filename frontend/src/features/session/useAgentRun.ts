@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { getSessionDetail, getSessionRuns } from "../../api/client";
-import { buildModelOverride, useModelOptionsStore } from "../../stores/model-options-store";
+import {
+  CUSTOM_PROFILE,
+  buildModelOverride,
+  buildSessionModelConfig,
+  persistSessionModelConfig,
+  restoreSessionModelConfig,
+  useModelOptionsStore,
+} from "../../stores/model-options-store";
 import { useSessionListStore } from "../../stores/session-list-store";
 import { useTraceStream } from "../trace/useTraceStream";
 import { streamRun } from "./agui-stream";
@@ -10,25 +17,29 @@ import type { EffortTier } from "./EffortSwitcher";
 import { historyToMessages } from "./history";
 
 type RunPhase = "idle" | "streaming";
-
-/** `last_message_seq -> run.id`，供 trace 面板给历史消息匹配运行（issue #69，ADR-0022）。 */
 type RunIdBySeq = Record<number, string>;
+type ConfigChoice = "system" | "custom";
 
-/**
- * 一个会话的消息状态与运行流消费（issue #65：前端的 tracer bullet）。
- *
- * 摘要行按消息 id 分开存放（而不是单个 `summary` 值）——同一会话里连续问几轮，
- * 每一轮回答都各自留一行摘要，不会被下一轮覆盖。
- */
+interface PendingConfigConfirmation {
+  text: string;
+  effort: EffortTier;
+}
+
 export function useAgentRun(sessionId: string) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [historyLoaded, setHistoryLoaded] = useState(false);
+  const [sessionExists, setSessionExists] = useState<boolean | null>(null);
   const [phase, setPhase] = useState<RunPhase>("idle");
   const [streamingId, setStreamingId] = useState<string | null>(null);
   const [summaries, setSummaries] = useState<Record<string, RunSummary>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [runIdBySeq, setRunIdBySeq] = useState<RunIdBySeq>({});
+  const [effort, setEffort] = useState<EffortTier>("medium");
+  const [pendingConfigConfirmation, setPendingConfigConfirmation] = useState<PendingConfigConfirmation | null>(null);
+  const [configChoiceResolved, setConfigChoiceResolved] = useState(false);
+  const [persistenceWarning, setPersistenceWarning] = useState<string | null>(null);
+  const hasSessionConfigRef = useRef(false);
   const { trees: traces, startTrace, handleTraceEvent } = useTraceStream();
   const abortRef = useRef<AbortController | null>(null);
 
@@ -36,28 +47,31 @@ export function useAgentRun(sessionId: string) {
     let cancelled = false;
     abortRef.current?.abort();
     setHistoryLoaded(false);
+    setSessionExists(null);
     setPhase("idle");
     setStreamingId(null);
     setRunIdBySeq({});
+    setPendingConfigConfirmation(null);
+    setConfigChoiceResolved(false);
+    setPersistenceWarning(null);
+    hasSessionConfigRef.current = false;
+    setEffort("medium");
     void getSessionDetail(sessionId).then((detail) => {
       if (cancelled) return;
+      const exists = detail !== null;
+      setSessionExists(exists);
+      const restored = restoreSessionModelConfig(sessionId, exists);
+      hasSessionConfigRef.current = restored !== null;
+      if (restored) setEffort(restored.effort);
       setMessages(detail ? historyToMessages(detail) : []);
       setHistoryLoaded(true);
     });
-    // 观测侧独立请求（ADR-0022：一个 handler 只碰一个 schema）——运行骨架与
-    // 消息序号在客户端合并，不指望后端把两者揉进一个响应。
     void getSessionRuns(sessionId).then((runs) => {
       if (cancelled) return;
       const bySeq: RunIdBySeq = {};
-      for (const run of runs) {
-        if (run.last_message_seq !== null) {
-          bySeq[run.last_message_seq] = run.id;
-        }
-      }
+      for (const run of runs) if (run.last_message_seq !== null) bySeq[run.last_message_seq] = run.id;
       setRunIdBySeq(bySeq);
-    }, () => {
-      // 观测侧不可用不阻断聊天——trace 面板对这些历史消息就没有可展开的详情。
-    });
+    }, () => undefined);
     return () => {
       cancelled = true;
     };
@@ -65,18 +79,37 @@ export function useAgentRun(sessionId: string) {
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
-  const sendMessage = useCallback(
-    async (text: string, effort: EffortTier = "medium") => {
+  const executeSend = useCallback(
+    async (text: string, selectedEffort: EffortTier, forceSystemDefault = false) => {
       const trimmed = text.trim();
-      if (!trimmed || phase === "streaming") {
+      const state = useModelOptionsStore.getState();
+      const decision = forceSystemDefault ? { kind: "none" as const } : buildModelOverride(state);
+      const assistantId = crypto.randomUUID();
+      if (decision.kind === "incomplete") {
+        setMessages((prev) => [
+          ...prev,
+          { id: crypto.randomUUID(), role: "user", text: trimmed, seq: null },
+          { id: assistantId, role: "assistant", text: "", seq: null },
+        ]);
+        setErrors((prev) => ({ ...prev, [assistantId]: `自定义端点还差：${decision.missing}` }));
         return;
       }
 
-      // 覆盖在按下发送这一刻取快照——这一轮用的就是当时选中的那个模型，运行途中
-      // 再改高级选项不影响它（issue #82：覆盖是运行级的，服务端不存任何选择状态）。
-      const decision = buildModelOverride(useModelOptionsStore.getState());
+      const config = buildSessionModelConfig(state, selectedEffort);
+      if (decision.kind === "none") {
+        config.profileChoice = null;
+        config.mainModel = "";
+        config.auxiliaryModel = "";
+        config.auxiliaryFollowsMain = true;
+        config.mainModelTouched = false;
+      }
+      hasSessionConfigRef.current = true;
+      if (!persistSessionModelConfig(sessionId, config)) {
+        setPersistenceWarning("浏览器未能保存本次配置；刷新后可能需要重新填写。运行仍会继续。");
+      } else {
+        setPersistenceWarning(null);
+      }
 
-      const assistantId = crypto.randomUUID();
       setMessages((prev) => [
         ...prev,
         { id: crypto.randomUUID(), role: "user", text: trimmed, seq: null },
@@ -84,132 +117,97 @@ export function useAgentRun(sessionId: string) {
       ]);
       setActiveTool(null);
       setErrors((prev) => omit(prev, assistantId));
-
-      if (decision.kind === "incomplete") {
-        // 用户选了自定义端点却没填完就发——不能静默改用服务端预设跑一轮
-        // （ADR-0014：模型由用户选定，系统永不代选）。这一轮就此打住，错误行挂在
-        // 刚落地的那条助手消息上说明还差什么；不进 streaming，也不碰后端。
-        setErrors((prev) => ({
-          ...prev,
-          [assistantId]: `自定义端点还差：${decision.missing}`,
-        }));
-        return;
-      }
-
       setPhase("streaming");
       setStreamingId(assistantId);
       startTrace(assistantId);
-
-      // 会话随第一条用户消息诞生（ADR-0013）：这里让侧边栏立刻看到这一行，
-      // 标题淡入替换前先落「新会话」骨架微光（issue #68）。
       useSessionListStore.getState().touchDraft(sessionId);
 
       const controller = new AbortController();
       abortRef.current = controller;
-
       let steps = 0;
       let tokens = 0;
       let usageIncomplete = false;
       let finished = false;
       let failed = false;
       const startedAt = performance.now();
-
       try {
         await streamRun(
           {
             session_id: sessionId,
             message: trimmed,
-            effort,
+            effort: selectedEffort,
             ...(decision.kind === "override" ? { model_override: decision.override } : {}),
           },
           {
             onTextDelta(delta) {
-              setMessages((prev) =>
-                prev.map((message) =>
-                  message.id === assistantId ? { ...message, text: message.text + delta } : message,
-                ),
-              );
+              setMessages((prev) => prev.map((message) => message.id === assistantId ? { ...message, text: message.text + delta } : message));
             },
-            onStepStarted() {
-              steps += 1;
-            },
-            onToolStarted(_toolCallId, name) {
-              setActiveTool(name);
-            },
-            onToolEnded() {
-              setActiveTool(null);
-            },
+            onStepStarted() { steps += 1; },
+            onToolStarted(_toolCallId, name) { setActiveTool(name); },
+            onToolEnded() { setActiveTool(null); },
             onUsage(payload) {
-              if (payload.usage_status !== "complete") {
-                usageIncomplete = true;
-                return;
-              }
-              tokens +=
-                (payload.input_tokens ?? 0) +
-                (payload.output_tokens ?? 0) +
-                (payload.reasoning_tokens ?? 0);
+              if (payload.usage_status !== "complete") { usageIncomplete = true; return; }
+              tokens += (payload.input_tokens ?? 0) + (payload.output_tokens ?? 0) + (payload.reasoning_tokens ?? 0);
             },
-            onTitleGenerated(titleSessionId, title) {
-              useSessionListStore.getState().applyTitle(titleSessionId, title);
-            },
-            onRunFinished() {
-              finished = true;
-            },
-            onRunError(message) {
-              failed = true;
-              setErrors((prev) => ({ ...prev, [assistantId]: message }));
-            },
-            onTraceEvent(envelope) {
-              handleTraceEvent(assistantId, envelope);
-            },
+            onTitleGenerated(titleSessionId, title) { useSessionListStore.getState().applyTitle(titleSessionId, title); },
+            onRunFinished() { finished = true; },
+            onRunError(message) { failed = true; setErrors((prev) => ({ ...prev, [assistantId]: message })); },
+            onTraceEvent(envelope) { handleTraceEvent(assistantId, envelope); },
           },
           controller.signal,
         );
       } catch (error) {
-        if (controller.signal.aborted) {
-          return;
-        }
+        if (controller.signal.aborted) return;
         failed = true;
-        setErrors((prev) => ({
-          ...prev,
-          [assistantId]: error instanceof Error ? error.message : "连接中断，请重试",
-        }));
+        setErrors((prev) => ({ ...prev, [assistantId]: error instanceof Error ? error.message : "连接中断，请重试" }));
       }
-
-      if (controller.signal.aborted) {
-        return;
-      }
-
+      if (controller.signal.aborted) return;
       setActiveTool(null);
       setPhase("idle");
       setStreamingId(null);
-      // 运行收尾（无论正常/出错/断连）都向后端要回权威的标题与消息数，不做客户端估算。
       void useSessionListStore.getState().refreshSession(sessionId);
       const disconnected = !finished && !failed;
-      setSummaries((prev) => ({
-        ...prev,
-        [assistantId]: {
-          steps,
-          durationMs: performance.now() - startedAt,
-          usageStatus: disconnected ? "disconnected" : usageIncomplete ? "incomplete" : "complete",
-          tokens: disconnected || usageIncomplete ? null : tokens,
-        },
-      }));
+      setSummaries((prev) => ({ ...prev, [assistantId]: {
+        steps,
+        durationMs: performance.now() - startedAt,
+        usageStatus: disconnected ? "disconnected" : usageIncomplete ? "incomplete" : "complete",
+        tokens: disconnected || usageIncomplete ? null : tokens,
+      } }));
     },
-    [phase, sessionId, startTrace, handleTraceEvent],
+    [handleTraceEvent, sessionId, startTrace],
   );
 
+  const sendMessage = useCallback(async (text: string, selectedEffort: EffortTier = effort): Promise<boolean> => {
+    const trimmed = text.trim();
+    if (!trimmed || phase === "streaming") return false;
+    if (sessionExists === null) return false;
+    if (sessionExists && !configChoiceResolved && !hasSessionConfigRef.current) {
+      setPendingConfigConfirmation({ text: trimmed, effort: selectedEffort });
+      return false;
+    }
+    const accepted = buildModelOverride(useModelOptionsStore.getState()).kind !== "incomplete";
+    void executeSend(trimmed, selectedEffort);
+    if (accepted) setConfigChoiceResolved(true);
+    return accepted;
+  }, [configChoiceResolved, effort, executeSend, phase, sessionExists]);
+
+  const confirmConfigChoice = useCallback(async (choice: ConfigChoice) => {
+    const pending = pendingConfigConfirmation;
+    if (!pending) return;
+    setPendingConfigConfirmation(null);
+    setConfigChoiceResolved(true);
+    if (choice === "system") {
+      useModelOptionsStore.getState().setSystemDefault();
+      await executeSend(pending.text, pending.effort, true);
+    } else {
+      useModelOptionsStore.getState().setProfileChoice(CUSTOM_PROFILE);
+    }
+  }, [executeSend, pendingConfigConfirmation]);
+
   return {
-    messages,
-    historyLoaded,
-    phase,
-    streamingId,
-    summaries,
-    errors,
-    activeTool,
-    traces,
-    runIdBySeq,
-    sendMessage,
+    messages, historyLoaded, sessionExists, phase, streamingId, summaries, errors, activeTool,
+    traces, runIdBySeq, effort, setEffort, sendMessage, pendingConfigConfirmation,
+    confirmConfigChoice, persistenceWarning,
   };
 }
 

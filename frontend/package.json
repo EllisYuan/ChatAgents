@@ -8,6 +8,7 @@
     "build": "npm run generate:types && tsc --noEmit && vite build",
     "lint": "eslint .",
     "typecheck": "npm run generate:types && tsc --noEmit",
+    "check:model-options": "node scripts/check-model-options-regression.mjs",
     "generate:types": "node scripts/generate-api-types.mjs"
   },
   "dependencies": {

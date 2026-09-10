@@ -4,7 +4,7 @@ import { useParams } from "react-router-dom";
 import { TracePanel } from "../trace/TracePanel";
 import { useUiStore } from "../../stores/ui-store";
 import { AdvancedOptions } from "./AdvancedOptions";
-import { EffortSwitcher, type EffortTier } from "./EffortSwitcher";
+import { EffortSwitcher } from "./EffortSwitcher";
 import { MessageMarkdown } from "./MessageMarkdown";
 import { useAgentRun } from "./useAgentRun";
 
@@ -22,10 +22,14 @@ export function SessionPage() {
     activeTool,
     traces,
     runIdBySeq,
+    effort,
+    setEffort,
     sendMessage,
+    pendingConfigConfirmation,
+    confirmConfigChoice,
+    persistenceWarning,
   } = useAgentRun(sessionId);
   const [draft, setDraft] = useState("");
-  const [effort, setEffort] = useState<EffortTier>("medium");
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -33,8 +37,9 @@ export function SessionPage() {
     if (!draft.trim() || phase === "streaming") {
       return;
     }
-    void sendMessage(draft, effort);
-    setDraft("");
+    void sendMessage(draft, effort).then((accepted) => {
+      if (accepted) setDraft("");
+    });
   };
 
   const isEmpty = historyLoaded && messages.length === 0;
@@ -117,6 +122,34 @@ export function SessionPage() {
             </button>
           </div>
           {advancedOpen && <AdvancedOptions disabled={phase === "streaming"} />}
+          {persistenceWarning && <p className="advanced-hint advanced-hint--error" role="alert">{persistenceWarning}</p>}
+          {pendingConfigConfirmation && (
+            <div className="config-confirmation" role="alertdialog" aria-label="确认模型配置">
+              <p>这是已有会话，但浏览器没有保存过它的模型配置。请选择本次发送使用哪一套配置。</p>
+              <div className="config-confirmation-actions">
+                <button
+                  type="button"
+                  className="text-button"
+                  onClick={() => {
+                    setDraft("");
+                    void confirmConfigChoice("system");
+                  }}
+                >
+                  使用系统默认
+                </button>
+                <button
+                  type="button"
+                  className="primary-action"
+                  onClick={() => {
+                    setAdvancedOpen(true);
+                    void confirmConfigChoice("custom");
+                  }}
+                >
+                  填写并使用自定义配置
+                </button>
+              </div>
+            </div>
+          )}
 
           <form className="composer" onSubmit={handleSubmit} aria-label="发送消息">
             <textarea

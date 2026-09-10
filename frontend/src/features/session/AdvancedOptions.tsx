@@ -4,6 +4,13 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getModelProfiles, getModels, refreshModels } from "../../api/client";
 import type { components } from "../../generated/api";
 import { CUSTOM_PROFILE, useModelOptionsStore } from "../../stores/model-options-store";
+import { InfoTooltip } from "./InfoTooltip";
+import {
+  DISCOVERY_UNAVAILABLE_HINT,
+  type AddressMode,
+  describeEndpoint,
+  validateEndpointUrl,
+} from "./model-endpoint";
 import { ModelPicker } from "./ModelPicker";
 import { SecretInput } from "./SecretInput";
 
@@ -37,7 +44,8 @@ export function AdvancedOptions({ disabled = false }: AdvancedOptionsProps) {
   const customCatalog = useModelOptionsStore((state) => state.customCatalog);
   const customStatus = useModelOptionsStore((state) => state.customStatus);
   const customErrorMessage = useModelOptionsStore((state) => state.customErrorMessage);
-  const setCustomCatalog = useModelOptionsStore((state) => state.setCustomCatalog);
+  const startCustomRefresh = useModelOptionsStore((state) => state.startCustomRefresh);
+  const finishCustomRefresh = useModelOptionsStore((state) => state.finishCustomRefresh);
   const setCustomStatus = useModelOptionsStore((state) => state.setCustomStatus);
   const mainModel = useModelOptionsStore((state) => state.mainModel);
   const setMainModel = useModelOptionsStore((state) => state.setMainModel);
@@ -103,29 +111,45 @@ export function AdvancedOptions({ disabled = false }: AdvancedOptionsProps) {
   }
 
   async function handleDownloadCustomModels() {
-    if (!custom.baseUrl.trim() || !custom.apiKey.trim()) {
+    const baseUrl = custom.baseUrl.trim();
+    if (!baseUrl || !custom.apiKey.trim()) {
       setCustomStatus("error", "base URL 与密钥都要填");
       return;
     }
-    setCustomStatus("loading");
+    const endpointError = validateEndpointUrl(baseUrl);
+    if (endpointError) {
+      setCustomStatus("error", endpointError);
+      return;
+    }
+
+    const revision = startCustomRefresh();
     try {
       const response = await refreshModels({
         endpoint_profile: null,
         protocol: custom.protocol,
-        base_url: custom.baseUrl.trim(),
+        base_url: baseUrl,
+        full_url: custom.fullUrl,
         auth_field: custom.authField.trim() || "Authorization",
         api_key: custom.apiKey,
       });
-      setCustomCatalog({
+      finishCustomRefresh(revision, {
         models: response.models ?? [],
         source: response.source,
         error: response.error ?? null,
       });
-      setCustomStatus("idle");
     } catch (error) {
-      setCustomStatus("error", error instanceof Error ? error.message : "下载模型清单失败");
+      finishCustomRefresh(revision, error instanceof Error ? error.message : "下载模型清单失败");
     }
   }
+
+  const addressMode: AddressMode = custom.fullUrl ? "full" : "auto";
+  const endpointDescription = custom.baseUrl.trim()
+    ? describeEndpoint(custom.protocol, custom.baseUrl, addressMode)
+    : null;
+  const customUrlError = custom.baseUrl.trim() ? validateEndpointUrl(custom.baseUrl) : null;
+  const endpointExample = custom.fullUrl
+    ? `例如 https://api.example.com/v1/${custom.protocol === "anthropic_messages" ? "messages" : custom.protocol === "openai_responses" ? "responses" : "chat/completions"}`
+    : "例如 https://api.example.com";
 
   const activeModels = isCustom ? (customCatalog?.models ?? null) : presetProfile ? presetModels : null;
 
@@ -149,7 +173,30 @@ export function AdvancedOptions({ disabled = false }: AdvancedOptionsProps) {
       </div>
 
       <div className="advanced-slot">
-        <span className="advanced-slot-label">密钥输入</span>
+        <span className="advanced-slot-label-row">
+          <span className="advanced-slot-label">密钥输入</span>
+          {isCustom && (
+            <InfoTooltip label="请求地址填写说明">
+              <p className="advanced-hint">{endpointExample}</p>
+              <p className="advanced-hint">
+                {custom.fullUrl
+                  ? "按填写的地址发送生成请求，不追加任何路径。"
+                  : "填服务根地址即可，自动补 /v1；已有路径则作为 API 前缀原样使用。"}
+              </p>
+              {endpointDescription && (
+                <>
+                  <p className="advanced-hint">生成 <code>{endpointDescription.generationPath}</code></p>
+                  {endpointDescription.discoveryPath ? (
+                    <p className="advanced-hint">发现 <code>{endpointDescription.discoveryPath}</code></p>
+                  ) : (
+                    <p className="advanced-hint advanced-hint--warning">{DISCOVERY_UNAVAILABLE_HINT}。</p>
+                  )}
+                  <p className="advanced-hint">模型清单获取成功不保证生成调用可用。</p>
+                </>
+              )}
+            </InfoTooltip>
+          )}
+        </span>
         {isCustom ? (
           <div className="custom-endpoint-fields">
             <select
@@ -168,12 +215,35 @@ export function AdvancedOptions({ disabled = false }: AdvancedOptionsProps) {
             <input
               className="advanced-input"
               type="text"
-              placeholder="base URL"
+              placeholder={custom.fullUrl ? "完整请求地址" : "请求地址"}
+              aria-label="请求地址"
+              aria-describedby="custom-endpoint-help"
+              aria-invalid={Boolean(customUrlError)}
               value={custom.baseUrl}
               onChange={(event) => setCustomField("baseUrl", event.target.value)}
               autoComplete="off"
               disabled={disabled}
             />
+            {/*
+              开关只改变「这串地址是什么」，不替用户改写输入框里的文本——自动改写
+              会让人看不出应用到底把地址理解成了什么（issue #83 的老毛病）。
+            */}
+            <button
+              type="button"
+              role="switch"
+              aria-checked={custom.fullUrl}
+              className={`full-url-switch${custom.fullUrl ? " full-url-switch--on" : ""}`}
+              onClick={() => setCustomField("fullUrl", !custom.fullUrl)}
+              disabled={disabled}
+            >
+              <span className="full-url-switch-track" aria-hidden="true" />
+              完整 URL
+            </button>
+            {customUrlError && (
+              <p id="custom-endpoint-help" className="advanced-hint advanced-hint--error" role="alert">
+                {customUrlError}
+              </p>
+            )}
             {/*
               鉴权字段做成选项卡而不是裸输入框：两个高频头名直接可选，选「自定义」
               才落回自由输入。后端仍按合法 header 名校验，选项卡不缩小可填集合。
@@ -223,7 +293,7 @@ export function AdvancedOptions({ disabled = false }: AdvancedOptionsProps) {
               type="button"
               className="text-button"
               onClick={() => void handleDownloadCustomModels()}
-              disabled={disabled || customStatus === "loading"}
+              disabled={disabled || customStatus === "loading" || Boolean(customUrlError)}
             >
               {customStatus === "loading"
                 ? "下载中…"
@@ -231,7 +301,7 @@ export function AdvancedOptions({ disabled = false }: AdvancedOptionsProps) {
                   ? "重新获取"
                   : "下载模型"}
             </button>
-            {customStatus === "error" && (
+            {customStatus === "error" && !customUrlError && (
               <p className="advanced-hint advanced-hint--error" role="alert">
                 {customErrorMessage}
               </p>
