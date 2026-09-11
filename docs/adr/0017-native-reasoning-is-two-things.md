@@ -23,6 +23,8 @@ Anthropic 官方："when you return tool results, you **must** pass the thinking
 
 OpenAI Responses 侧官方措辞是 "highly recommend" 而非强制，但 `store: false` 下 reasoning item 默认带 `encrypted_content`，形态与处置完全一致，不为它单开一条路径。
 
+Responses 的不透明附件按协议原样保留整个 reasoning item 信封：`type`、`id`、`encrypted_content` 与必需的 `summary` 字段。`summary` 即使为空数组也不能删除，因为它是 schema 的结构性字段；这里保留字段不等于把摘要正文当作模型可见的对话内容。摘要正文仍只进观测跨度，不进消息表的普通内容。
+
 ## 显示摘要进跨度
 
 摘要不进消息表，理由与 [ADR-0010](./0010-the-system-prompt-is-run-configuration-not-conversation-memory.md) 把系统提示词挡在消息表外完全相同：**模型自己看不见它。** 官方原文 "The thinking model does not see the summarized output"，摘要由另一个模型生成，且 "subject to change"。它不是对话记忆。

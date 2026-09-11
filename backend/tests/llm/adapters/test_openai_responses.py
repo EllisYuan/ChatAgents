@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from chat_agents.llm.adapters.openai_responses import OpenAIResponsesAdapter
+from chat_agents.llm.adapters.openai_responses import OpenAIResponsesAdapter, build_request
 from chat_agents.llm.effort import EffortTier
 from chat_agents.llm.events import (
     ModelCallCompleted,
@@ -15,7 +15,13 @@ from chat_agents.llm.events import (
     ToolCallCompleted,
     ToolCallStarted,
 )
-from chat_agents.llm.message import ModelMessage, OpaqueBlock, TextBlock, ToolCallBlock
+from chat_agents.llm.message import (
+    ModelMessage,
+    OpaqueBlock,
+    TextBlock,
+    ToolCallBlock,
+    ToolResultBlock,
+)
 from chat_agents.llm.profile import EndpointProfile
 from chat_agents.tools.types import ToolSpec
 from pydantic import SecretStr
@@ -204,6 +210,7 @@ def test_happy_path_completed_message_and_usage() -> None:
         "type": "reasoning",
         "id": "rs_1",
         "encrypted_content": "opaque-blob",
+        "summary": [],
     }
     assert text == TextBlock(text="the answer is ")
     assert tool_call == ToolCallBlock(id="call_1", name="add", arguments={"a": 1, "b": 3})
@@ -257,7 +264,7 @@ def test_interruption_after_usage_known_reports_partial_usage() -> None:
     assert completed[0].stop_reason == "interrupted"
 
 
-def test_completed_reasoning_opaque_payload_excludes_display_summary() -> None:
+def test_completed_reasoning_opaque_payload_preserves_summary_field() -> None:
     events = _happy_path_events()
     events[-1].response.output[0].summary = [SimpleNamespace(type="summary_text", text="可读摘要")]
 
@@ -274,4 +281,36 @@ def test_completed_reasoning_opaque_payload_excludes_display_summary() -> None:
         "type": "reasoning",
         "id": "rs_1",
         "encrypted_content": "opaque-blob",
+        "summary": [{"type": "summary_text", "text": "可读摘要"}],
     }
+
+
+def test_request_payload_backfills_required_summary_for_legacy_reasoning_item() -> None:
+    payload = build_request(
+        messages=[
+            ModelMessage(
+                role="assistant",
+                content=(
+                    OpaqueBlock(
+                        protocol="openai_responses",
+                        data={
+                            "type": "reasoning",
+                            "id": "rs_1",
+                            "encrypted_content": "opaque-blob",
+                        },
+                    ),
+                    ToolCallBlock(id="call_1", name="add", arguments={"a": 1, "b": 3}),
+                ),
+            ),
+            ModelMessage(
+                role="tool",
+                content=(ToolResultBlock(tool_call_id="call_1", content="4"),),
+            ),
+        ],
+        tools=[],
+        model="gpt-5.5",
+        effort="medium",
+    )
+
+    reasoning = next(item for item in payload["input"] if item.get("type") == "reasoning")
+    assert reasoning["summary"] == []
