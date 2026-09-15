@@ -1,12 +1,8 @@
 # 线格式说 AG-UI，跑在 SSE 上
 
-[ADR-0008](./0008-a-run-emits-domain-events-not-wire-frames.md) 把[运行事件](../../CONTEXT.md)与线格式切开后，留下一个没答的问题：线格式究竟长什么样。现状是 `json.dumps(...) + "\n"` 配 `media_type="application/json"`——既不是 SSE，也不是任何有名字的东西，中间层没有任何理由不缓冲它。
-
-**决定：线格式采用 AG-UI 协议，传输用 SSE。运行事件仍是自有领域类型，映射发生在 `encode_sse` 一处。**
+**线格式采用 AG-UI 协议，传输用 SSE。运行事件仍是自有领域类型，映射发生在 `encode_sse` 一处。**
 
 ## 为什么是 AG-UI 而不是自定义 schema
-
-AG-UI 在 2025-05 由 CopilotKit 发布，2026 年已是既成事实：MIT、15.2k star、每三五天一个 release，[AWS 在 2026-03 给 Bedrock AgentCore Runtime 加了支持](https://aws.amazon.com/about-aws/whats-new/2026/03/amazon-bedrock-agentcore-runtime-ag-ui-protocol/)，[Microsoft Agent Framework 也写进了集成文档](https://learn.microsoft.com/en-us/agent-framework/integrations/ag-ui/)。它的事件分类与本项目要传的东西高度重合，`ag-ui-protocol` 0.1.19 只依赖 `pydantic`，并自带 `ag_ui.encoder.EventEncoder`——`encode()` 就是 `data: {json}\n\n`。
 
 在一个已经收敛出标准的地方自创一套事件 schema，是评审第一眼就会问的问题。它不满足业务要求的那天再重构，成本远低于现在就替一个假想的未来买保险。
 
@@ -38,14 +34,12 @@ AG-UI 的事件表里**没有用量、成本、跨度的位置**——那恰好�
 
 ## 后果
 
-**消息标识必须确定性派生。** 一次运行产出多条助手消息（每次模型调用一条）与多条 tool 消息，数量运行时才知道，而 `TextMessageStartEvent` 每条都要 `message_id`。Runner 内部 `uuid4()` 会毁掉评测 L2 回放"同输入同事件流"的可断言性，所以只有运行标识由调用方预生成，消息标识一律 `uuid5(运行标识, 迭代序号[, 工具序号])` 派生。这让纯度是**结构性成立**的，而不是靠测试时记得注入假生成器。代价：**消息主键得是外部可生成的，不能是数据库自增**；[ADR-0001](./0001-messages-are-the-single-source-of-truth.md) 定的会话内 `seq` 排序不受影响，`seq` 仍由落库时分配。
+**消息标识必须确定性派生。** 一次运行可能生成多条助手消息（每次模型调用一条）和多条 tool 消息，具体数量只有运行过程中才能确定；但每条 `TextMessageStartEvent` 都必须携带 `message_id`。如果 Runner 内部调用 `uuid4()`，评测 L2 回放就无法断言“同输入产生同一事件流”。因此，只有运行标识由调用方预先生成，其他消息标识都按 `uuid5(运行标识, 迭代序号[, 工具序号])` 确定性派生。这样，纯度由实现结构保证，不依赖测试时记得注入假生成器。代价是：**消息主键必须支持外部生成，不能使用数据库自增**；[ADR-0001](./0001-messages-are-the-single-source-of-truth.md) 规定的会话内 `seq` 排序不受影响，`seq` 仍在落库时分配。
 
-**只吃 `@ag-ui/core`。** `@ag-ui/client` 会拖进精确钉死的 `rxjs` 7.8.1，而前端状态方案是 Zustand + TanStack Query，再进一套 RxJS 就是第二套状态范式共存；`@ag-ui/proto` 的 protobuf 用不上。流的消费自己写：`fetch` + `eventsource-parser` 3.1.0。不选 `eventsource` 4.1.1 是因为它实现完整 EventSource 语义**含自动重连**，而断连就地停的前提下自动重连会闷声重开一次运行、重复烧钱；不选 Vercel `ai` 是因为它自带整套 agent/model 抽象，与自建 `ModelPort` 正面冲突。
+**只引入 `@ag-ui/core`。** `@ag-ui/client` 会引入固定版本的 `rxjs` 7.8.1，而前端已经采用 Zustand + TanStack Query 作为状态方案；再引入 RxJS，就会让两套状态范式并存。`@ag-ui/proto` 提供的 protobuf 在本项目中也用不上。因此，流的消费由我们自行实现：使用 `fetch` 加 `eventsource-parser` 3.1.0。不选 `eventsource` 4.1.1，是因为它实现了完整的 EventSource 语义，**包括自动重连**；在断连即停的前提下，自动重连可能悄悄重新启动一次运行，造成重复消耗。也不选 Vercel `ai`，因为它自带完整的 agent/model 抽象，与自建的 `ModelPort` 正面冲突。
 
-**zod 3 与 zod 4 会并存。** AG-UI 全线在 `zod ^3`，而 zod 当前是 4.4.3。只吃 `core` 是为把这个污染面压到最小。
+**zod 3 与 zod 4 会并存。** AG-UI 全线依赖 `zod ^3`，而本项目当前使用的是 zod 4.4.3。只引入 `@ag-ui/core`，可以把这两套版本共存带来的污染面压到最小。
 
-**三个包钉精确版本，Renovate 单开一组、不自动合并。** 0.0.x 下 semver 不保证任何东西。前后端同版本号同发布，所以破坏性变更不需要兼容窗口，只需要一次同步升，由契约测试把门。
+**三个包固定精确版本，Renovate 单独成组且不自动合并。** 在 0.0.x 阶段，semver 并不能提供可靠的兼容性保证。前后端使用同一版本号并同步发布，因此破坏性变更不需要兼容窗口，只需要一次同步升级，并由契约测试把关。
 
-**33 个事件类型只发 15 种。** `THINKING_*`（被 `REASONING_*` 取代）、三个 `*_CHUNK`（那是给不知道消息边界的生产者的便利形态）、`STATE_*`（Agent 状态快照只写不读）、`MESSAGES_SNAPSHOT`（历史走 REST）、`ACTIVITY_*` / `RAW` 一律不发。`REASONING_*` 语义位留着但本期不发——原生 reasoning 的采集还没有票覆盖，现在发等于先定一个没人产出的格式。
-
-> **已由 [ADR-0017](./0017-native-reasoning-is-two-things.md) 修订。** 原生推理的采集已有决定，七个 `REASONING_*` 里发五个（不发 `REASONING_MESSAGE_CHUNK` 与 `REASONING_ENCRYPTED_VALUE`），**只发的总数从 15 种改为 20 种**。本节其余结论不变。
+**33 个事件类型中只发送 20 种。** `THINKING_*`（已被 `REASONING_*` 取代）、三个 `*_CHUNK`（面向无法确定消息边界的生产者提供的便利形态）、`STATE_*`（Agent 状态快照只写不读）、`MESSAGES_SNAPSHOT`（历史消息通过 REST 获取）以及 `ACTIVITY_*` / `RAW` 一律不发送。原生 reasoning 的采集已有明确决定：七个 `REASONING_*` 中发送五个，只不发送 `REASONING_MESSAGE_CHUNK` 和 `REASONING_ENCRYPTED_VALUE`。

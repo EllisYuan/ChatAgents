@@ -1,8 +1,6 @@
 # 一次运行只产出领域事件，不产出线格式
 
-现状 `stream_agent` 里 250 行内联流式处理，同时干着四件事：解析模型输出、拼 SSE 帧、累积完整回答、在 `finally` 里落盘会话。四件事纠缠在一个生成器里，改任何一件都要读懂其余三件。
-
-**决定：[运行](../../CONTEXT.md)的唯一产物是[运行事件](../../CONTEXT.md)流。** `AgentRunner` 是纯的——收一份消息序列与[端点档案](../../CONTEXT.md)，吐一串领域事件，**不碰数据库、不碰 HTTP、不知道 SSE 存在**。
+**[运行](../../CONTEXT.md)的唯一产物是[运行事件](../../CONTEXT.md)流。** `AgentRunner` 是纯的——收一份消息序列与[端点档案](../../CONTEXT.md)，吐一串领域事件，**不碰数据库、不碰 HTTP、不知道 SSE 存在**。
 
 ```python
 class AgentRunner:
@@ -14,10 +12,10 @@ class AgentRunner:
 落库与编码由包装器承担，组装发生在 `main.py` 一处：
 
 ```python
-encode_sse(              # 传输层：领域事件 → 线格式
-    observe(             # observability/：落跨度，独立事务，失败只记日志
-        persist(         # conversation/：落消息，业务事务，失败要报错
-            runner.run(messages, main_profile, auxiliary_profile))))
+encode_sse(              # transport/ 把事件转换成前端协
+    observe(             # observability/ 负责记录运行观测
+        persist(         # conversation/ 负责保存业务消息
+            runner.run(messages, main_profile, auxiliary_profile))))	#Agent 先产生领域事件
 ```
 
 ## 为什么 Loop 不能直接产 SSE
@@ -30,23 +28,15 @@ encode_sse(              # 传输层：领域事件 → 线格式
 
 领域事件流正是那个不靠自觉的机制：Loop 不知道有没有人在听，观测订阅者自己开自己的事务、自己吞自己的异常。
 
-## 为什么不用依赖倒置
-
-本来准备让 `agent/` 定义一个 `RunObserver` Protocol、由 `observability/` 实现、`main.py` 注入。**不需要**——ADR-0002 允许的依赖方向恰恰是 `obs → app`，所以让 observability 直接包装事件流即可。`agent/` 里没有任何一行知道观测存在，也没有 Protocol、没有注册表、没有容器。
-
-[ADR-0004](./0004-tools-are-capabilities-providers-are-implementations.md) 说"跨度记录归[工具执行器](../../CONTEXT.md)"与此不冲突：执行器仍是发出工具事件的唯一入口，责任集中点没有变化，只是它发出的是事件而非跨度。层级标识由 agent 生成并随事件带出，observability 负责把它映射成跨度树。
-
 ## 为什么 Runner 必须是纯的
 
 因为评测的 L2 回放层要在没有网络、没有数据库的情况下跑完整个 Loop。Runner 纯的话，一条 eval case 就是"喂一份 JSON 序列进去、断言吐出来的事件流"；Runner 自己读库的话，每条 case 都得先在库里摆好一个会话。
 
-代价是 Runner 不能在运行中途决定"我想多读点历史"。这不是损失——输入序列本来就该在开跑前确定，运行中途改记忆是 [ADR-0001](./0001-messages-are-the-single-source-of-truth.md) 明确推翻的 checkpointer 那套。
-
-因此**"从消息表重建模型输入序列"归 `conversation/service.py`**，不归 agent。
-
 ## 事件粒度分两级
 
-`ModelEvent`（`llm/` 产出）是**一次模型调用**内部的事件；`RunEvent`（`agent/` 产出）是**一次运行**的事件，一次运行含多次模型调用与多次工具往返。ReAct 的多轮结构正好活在两者的差里。
+`ModelEvent`（`llm/` 产出）是**一次模型调用**内部的事件；
+
+`RunEvent`（`agent/` 产出）是**一次运行**的事件，一次运行含多次模型调用与多次工具往返。ReAct 的多轮结构正好活在两者的差里。
 
 两级看似重复（都有 `TextDelta`），但 `ToolStarted` / `ToolFinished` / `RunCompleted` / `RunFailed` 在模型调用层面根本不存在。重复的只有一个字段名，不是一套平行体系。不做 1:1 机械转发。
 

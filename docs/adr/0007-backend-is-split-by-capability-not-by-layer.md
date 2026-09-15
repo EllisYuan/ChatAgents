@@ -1,8 +1,6 @@
 # 后端按能力模块分层，不按技术层
 
-`app.py` 一个文件 592 行，其中 `stream_agent` 一个函数 356 行：密钥提取、LLM 构造、提示词选择、agent 构建、250 行内联流式解析、`finally` 里的会话落盘全在里面。后果不是"不好看"，是**没有任何一块可以脱离 FastAPI 单独测试**。
-
-**决定：按能力模块切分，模块内四层。** 判据是可测试性，不是像不像大厂。
+**决定：后端架构按能力模块切分，模块内四层。** 判据是可测试性，不是像不像大厂。
 
 ```
 backend/src/chat_agents/
@@ -22,33 +20,44 @@ backend/src/chat_agents/
 
 ## 为什么不按技术层切
 
-`api/` + `services/` + `repositories/` 是更常见的起手式，但它在这个项目里有一处硬伤：[ADR-0002](./0002-business-and-observability-share-a-database.md) 要求业务模块不得 import 观测模块，而**那是一条模块边界，不是层边界**。按技术层切，`services/` 里同时住着会话服务与跨度写入器、`repositories/` 里同时住着消息表与跨度表——这条纪律在目录上完全看不见，只能靠 code review 盯。按能力切，它退化成一条 import 规则，CI 可强制——这条依赖方向如今由 Import Linter 在 pre-commit 与 CI 两处执行（[ADR-0034](./0034-invariants-are-enforced-not-documented.md)），不再依赖本文件被读到。
+`api/` + `services/` + `repositories/` 是常见的技术分层方式，但它无法表达本项目最重要的一条边界：根据 [ADR-0002](./0002-business-and-observability-share-a-database.md)，业务模块不得依赖观测模块。这个约束区分的是**能力模块**，不是技术层；如果按技术层组织，会话服务与跨度写入器都会落在 `services/`，消息查询与跨度查询也都会落在 `repositories/`，目录本身无法看出两者不能互相依赖。
 
-依赖方向因此是单向的。下表列的是**能力模块之间实际存在的直接 import 边**（非传递可达）；括号里概括该模块另外还依赖的持久化与共享叶子，不逐一列举。
+因此，后端按能力模块组织：`conversation/`、`agent/`、`llm/`、`tools/` 和 `observability/` 各自拥有自己的 `router.py`、`service.py`、`repository.py` 与 `models.py`（适用时）。模块之间的边界由 import 方向表达，并由 Import Linter 在 pre-commit 和 CI 中强制执行（见 [ADR-0034](./0034-invariants-are-enforced-not-documented.md)）。
 
+### 当前的模块依赖
+
+以下是当前实现中能力模块之间的**直接 import 边**；箭头表示“左侧模块 import 右侧模块”，不表示运行时调用顺序，也不表示传递依赖。
+
+```text
+llm/           ─→ 共享叶子
+tools/         ─→ 共享叶子
+agent/         ─→ llm/, tools/
+conversation/  ─→ agent/, llm/
+observability/ ─→ agent/, llm/
+transport/     ─→ agent/, llm/
+eval_summary/  ─→ llm/
 ```
-llm/            ─→ （共享叶子）
-tools/          ─→ （共享叶子）
-agent/          ─→ llm, tools            （db, 共享叶子）
-conversation/   ─→ agent, llm            （db, database, 共享叶子）
-                                          ↑ agent/events 的领域事件类型
-observability/  ─→ agent, llm            （db, database）
-                    ↑ ADR-0002 允许的方向
-main.py         ─→ 除 tools 外的全部     （tools 经 agent 传递可达）
-                                          外加 database 与若干共享叶子
-```
 
-括号里两类都不是能力模块，不参与本节要约束的那条纪律：`db/` 与 `database.py` 是持久化基础设施；共享叶子指 `validation.py` / `token_estimation.py` / `model_catalog.py` / `exceptions.py` 这类无业务的工具模块。
+`main.py` 是唯一的组装入口，直接连接各个需要暴露或编排的模块；它不直接 import `tools/`，tools 由 `agent/` 使用。能力模块还可以依赖基础设施和共享叶子，例如：
 
-`transport/`（ADR-0009 定的 AG-UI 编码层）与 `eval_summary/` 是后于本 ADR 加入的边界模块，方向同为向内：`transport/ ─→ agent, llm`，`eval_summary/ ─→ llm`。
+- `db/`、`database.py`：持久化基础设施；
+- `validation.py`、`token_estimation.py`、`model_catalog.py`、`exceptions.py`：无业务方向的共享叶子。
 
-要保住的性质不是"零依赖"这个字面，而是：**`llm/` 不认识 agent / conversation / observability / tools**。因此三协议契约测试可以完全独立跑，不需要数据库、不需要 FastAPI。`tools/` 同理。
+这些依赖不属于能力模块之间的边界关系，因此不放进上面的主图。
 
-`conversation/ ─→ agent` 的内容是 `conversation/streaming.py` 里的 `persist()` 消费 `agent/events` 的领域事件类型。这与三重包装的形状一致——`persist` 本来就包在 `runner.run` 外面，外层认识内层发出的事件类型是自然的。
+### 这条方向要保护什么
 
-> **本节已按实测更正（[#78](https://github.com/EllisYuan/ChatAgents/issues/78)）。** 原文写于实现之前，四处与代码不符：`agent/ ─→ conversation` 方向相反、`observability/ ─→ conversation` 这条边不存在、`llm/` 与 `tools/` 各有共享叶子依赖、`main.py` 不直接 import `tools`。
->
-> **选择更正 ADR 而非改代码。** 这段文字要保证的架构性质——`llm/` 与观测的隔离——在当前实现下全部成立，四处偏差没有一处破坏它。唯一像漂移的 `conversation/ ─→ agent`，要反转就得先决定 `agent/events` 里那些事件类型归谁，而它们本就是 `agent/` 的产出；为对齐一段陈述而搬迁领域类型，是让代码迁就文档。
+这里要保护的不是“模块之间完全没有依赖”，而是依赖不能反向穿越能力边界。尤其是：
+
+- `llm/` 不得 import `agent/`、`conversation/`、`observability/`、`tools/` 或 `transport/`；
+- `tools/` 不得 import `agent/`、`conversation/`、`llm/` 或 `observability/`；
+- 业务模块和传输模块不得依赖 `observability/`。
+
+这样，`llm/` 和 `tools/` 才能保持为独立的共享叶子。三协议契约测试可以在不启动数据库和 FastAPI 的情况下运行，tools 也不需要反向依赖 Agent 或具体的观测实现。
+
+`conversation/ → agent/` 和 `observability/ → agent/` 是有意保留的正向依赖。前者由 `conversation/streaming.py` 中的 `persist()` 消费 `agent/events` 的领域事件类型；后者由观测模块消费 Agent 运行事件并写入 trace。Agent 只负责产出事件，不需要知道消息持久化或观测实现。
+
+这段描述以当前代码为准；早期草案中的依赖方向曾与实现不一致，后续按实测代码修正了 ADR，而没有为了匹配旧文字搬迁领域类型。
 
 模块名 `llm/` 而非 `models/` 是刻意的：`models` 在 Python web 生态里约定俗成指 ORM，占用它会让每个新读者误解一次；而 `llm/` 一眼说明这个项目是什么。ORM 因此保住 `<module>/models.py` 这个业界通行的位置。
 
@@ -69,7 +78,7 @@ main.py         ─→ 除 tools 外的全部     （tools 经 agent 传递可�
 
 全项目约 13 个 repository 方法，其中只有 2 个是用例专用的复杂查询。
 
-## Session 生命周期分两套
+## Database Session 生命周期分两套
 
 | 端点 | 策略 |
 |---|---|
@@ -79,12 +88,6 @@ main.py         ─→ 除 tools 外的全部     （tools 经 agent 传递可�
 FastAPI 0.118.0 起 `yield` 依赖的收尾在响应发送之后执行，所以请求级 session **能**在整个流式响应期间保持打开——但那正是问题所在。一次运行含多次模型调用与工具往返，几十秒起步，请求级 session 意味着这几十秒死死占住连接池一条连接；demo 公开、并发不可控，被拖死的是那些毫秒级的 CRUD 请求。
 
 短事务同时让 ADR-0002 的纪律变成代码的形状：业务写入与观测写入各自 `async with session_factory()`，**物理上不可能同事务提交**。这一条不再需要人记住。
-
-## 其他被否决的方案
-
-**引入 DI 容器**（dishka 一类）。`app.dependency_overrides` 已经解决了测试替换，容器在这个体量下是纯负担。只用 FastAPI 原生 `Depends` + `Annotated`；全局单例 `get_session_manager()` 删除。
-
-**`evals/` 提到仓库根**。evals 的五层里 L1–L4 全部 import `chat_agents`，独立成第二个 Python 项目只是把 import 问题换成打包问题。落在 `backend/tests/evals/`，用 pytest marker（`-m "not eval"` 默认不跑付费层）区分运行时机——用目录解决运行时机问题是拿错工具。
 
 ## 后果
 

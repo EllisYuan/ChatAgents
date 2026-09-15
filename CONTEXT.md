@@ -1,4 +1,4 @@
-# Yuan's Chat Agents
+# Chat Agents
 
 一个以「LLM 应用工程」为核心能力展示的 ReAct agent 项目：evals、trace、token 与延迟可观测、可复现、多模型路由降级。
 

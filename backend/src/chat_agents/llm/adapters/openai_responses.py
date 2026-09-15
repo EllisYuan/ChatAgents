@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from openai import AsyncOpenAI
 
@@ -66,21 +66,31 @@ def _serialize_message(message: ModelMessage) -> list[dict[str, Any]]:
                 }
             )
         elif isinstance(block, OpaqueBlock):
-            items.append(_strip_display_summary(block.data))
+            items.append(_serialize_opaque_block(block))
     return items
 
 
-def _strip_display_summary(reasoning_item: dict[str, Any]) -> dict[str, Any]:
-    """显示摘要永不进模型输入（ADR-0017）——往返载荷只有 ``encrypted_content``。
+def _serialize_opaque_block(block: OpaqueBlock) -> dict[str, Any]:
+    """保留 Responses reasoning item 的结构性字段，不把摘要正文当作对话内容。
 
-    OpenAI 官方措辞是「highly recommend」按原样传回而非强制逐字节不变（这一点与
-    Anthropic 的「must be... unmodified」不同，见该协议适配器的对应处理），所以
-    这里可以放心去掉 ``summary``，不会像 Anthropic 那样有被判定为改动过而 400 的
-    风险。
+    ``summary`` 是 OpenAI Responses schema 的必需字段，即使为空也必须回传。旧消息
+    可能由修复前的版本写入、缺少这个字段，因此序列化时补上默认空数组；新消息则
+    保留上游提供的 summary item。摘要正文仍只通过 ``ReasoningDelta`` 进入观测跨度。
     """
-    if reasoning_item.get("type") != "reasoning":
-        return reasoning_item
-    return {k: v for k, v in reasoning_item.items() if k != "summary"}
+    data = dict(block.data)
+    if data.get("type") == "reasoning":
+        data.setdefault("summary", [])
+    return data
+
+
+def _serialize_summary_item(summary: Any) -> dict[str, Any]:
+    """把 SDK 的 summary model 转成可持久化、可回传的 JSON 对象。"""
+    model_dump = getattr(summary, "model_dump", None)
+    if callable(model_dump):
+        return cast(dict[str, Any], model_dump(mode="json"))
+    if isinstance(summary, dict):
+        return dict(summary)
+    return cast(dict[str, Any], vars(summary))
 
 
 def build_request(
@@ -181,8 +191,12 @@ class _Accumulator:
                 arguments = json.loads(item.arguments) if item.arguments else {}
                 content.append(ToolCallBlock(id=item.call_id, name=item.name, arguments=arguments))
             elif item_type == "reasoning":
-                # ``summary`` 已通过 ReasoningDelta 进入观测跨度；它不是模型输入，
-                # 因此 opaque 消息附件只保留 Responses 要求回传的加密载荷。
+                # ``summary`` 的正文通过 ReasoningDelta 进入观测跨度；opaque 附件仍须
+                # 保留这个 Responses schema 要求的结构性字段，不能把字段本身删掉。
+                summary = [
+                    _serialize_summary_item(summary_item)
+                    for summary_item in (getattr(item, "summary", None) or [])
+                ]
                 content.append(
                     OpaqueBlock(
                         protocol="openai_responses",
@@ -190,6 +204,7 @@ class _Accumulator:
                             "type": "reasoning",
                             "id": item.id,
                             "encrypted_content": getattr(item, "encrypted_content", None),
+                            "summary": summary,
                         },
                     )
                 )

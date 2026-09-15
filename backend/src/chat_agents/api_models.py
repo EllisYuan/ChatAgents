@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
+from .llm.endpoint_address import AddressMode
 from .llm.protocol import DEFAULT_PROTOCOL, Protocol
 from .validation import (
     MAX_AUTH_FIELD_LENGTH,
@@ -98,6 +99,9 @@ class ModelRefreshRequest(BaseModel):
     base_url: str | None = Field(default=None, max_length=MAX_BASE_URL_LENGTH)
     auth_field: str = Field(default="Authorization", max_length=MAX_AUTH_FIELD_LENGTH)
     api_key: SecretStr | None = None
+    # 与 `ModelOverride.full_url` 同义：省略即 `auto`。清单地址随生成地址一起解析，
+    # 两步不能再各拼各的（issue #83）。
+    full_url: bool | None = None
 
     @field_validator("endpoint_profile")
     @classmethod
@@ -131,9 +135,15 @@ class ModelRefreshRequest(BaseModel):
     def _validate_custom_endpoint(self) -> ModelRefreshRequest:
         if self.base_url is None and self.api_key is not None:
             raise ValueError("api_key 只能和 base_url 一起使用")
+        if self.base_url is None and self.full_url is not None:
+            raise ValueError("full_url 只能和 base_url 一起使用")
         if self.base_url is not None and self.api_key is None:
             raise ValueError("自定义端点缺少 api_key")
         return self
+
+    @property
+    def address_mode(self) -> AddressMode:
+        return "full" if self.full_url else "auto"
 
 
 class ModelRefreshResponse(ModelsResponse):

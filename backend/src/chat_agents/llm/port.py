@@ -12,6 +12,7 @@ ADR-0016「访客的东西不进全局设施」同源——缓存容量是 8，�
 
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
+from typing import Any
 from typing import Protocol as TypingProtocol
 
 import httpx
@@ -24,6 +25,7 @@ from .adapters.openai_chat_completions import OpenAIChatCompletionsAdapter
 from .adapters.openai_responses import OpenAIResponsesAdapter
 from .client_cache import HttpClientCache
 from .effort import EffortTier
+from .endpoint_address import resolve_endpoint_address
 from .events import ModelEvent
 from .message import ModelMessage
 from .profile import EndpointProfile
@@ -45,6 +47,47 @@ class ModelPort(TypingProtocol):
     ) -> AsyncIterator[ModelEvent]: ...
 
 
+def _sdk_base_url(profile: EndpointProfile) -> str:
+    """交给 SDK 的 base——始终与最终 URL 同源，Host 与鉴权头因此不受改写影响。"""
+
+    return resolve_endpoint_address(
+        profile.base_url, protocol=profile.protocol, mode=profile.address_mode
+    ).sdk_base_url
+
+
+def _install_generation_route(
+    client: httpx.AsyncClient | httpx2.AsyncClient, profile: EndpointProfile
+) -> None:
+    """把 SDK 拼出的生成 URL 改写成解析结果（issue #83 的自动补全与完整 URL）。
+
+    三套适配器都用官方 SDK 的资源方法，没有「这次打这个 URL」的入参。与其为两种
+    地址模式各写一份请求构造，不如在 HTTP 客户端的公开 request 钩子上，把 SDK 那
+    一个请求换个 URL——body、鉴权头、流式与错误处理全部仍归 SDK。
+
+    钩子只认「SDK 按 ``sdk_native`` 规则会发出的那一个 POST」。不无条件改写每个
+    请求：重定向后的请求也会再过一遍钩子，逐个改写会把重定向变成死循环。
+    """
+
+    resolved = resolve_endpoint_address(
+        profile.base_url, protocol=profile.protocol, mode=profile.address_mode
+    )
+    # SDK 自己会拼成什么——用同一个解析器算，两边规则不会各自漂移。
+    sdk_url = resolve_endpoint_address(
+        resolved.sdk_base_url, protocol=profile.protocol, mode="sdk_native"
+    ).generation_url
+    if sdk_url == resolved.generation_url:
+        return
+
+    url_type = type(client.base_url)
+    target = url_type(resolved.generation_url)
+
+    async def route_generation(request: Any) -> None:
+        if request.method == "POST" and str(request.url) == sdk_url:
+            request.url = target
+
+    client.event_hooks["request"] = [*client.event_hooks["request"], route_generation]
+
+
 def _build_port(
     profile: EndpointProfile, http_client: httpx.AsyncClient | httpx2.AsyncClient
 ) -> ModelPort:
@@ -63,7 +106,7 @@ def _build_port(
         return AnthropicMessagesAdapter(
             client=AsyncAnthropic(
                 api_key=api_key,
-                base_url=profile.base_url,
+                base_url=_sdk_base_url(profile),
                 http_client=http_client,
                 default_headers=auth_headers,
                 max_retries=0,
@@ -73,7 +116,7 @@ def _build_port(
     assert isinstance(http_client, httpx2.AsyncClient)
     openai_client = AsyncOpenAI(
         api_key=api_key,
-        base_url=profile.base_url,
+        base_url=_sdk_base_url(profile),
         http_client=http_client,
         default_headers=auth_headers,
         max_retries=0,
@@ -86,15 +129,25 @@ def _build_port(
 def _new_http_client(profile: EndpointProfile) -> httpx.AsyncClient | httpx2.AsyncClient:
     """两库并存是预期状态（ADR-0025）：anthropic SDK 用 httpx，openai SDK 用 httpx2。"""
 
-    if profile.protocol == "anthropic_messages":
-        return httpx.AsyncClient(base_url=profile.base_url)
-    return httpx2.AsyncClient(base_url=profile.base_url)
+    base_url = _sdk_base_url(profile)
+    client: httpx.AsyncClient | httpx2.AsyncClient = (
+        httpx.AsyncClient(base_url=base_url)
+        if profile.protocol == "anthropic_messages"
+        else httpx2.AsyncClient(base_url=base_url)
+    )
+    _install_generation_route(client, profile)
+    return client
 
 
 def get_model_port(
     profile: EndpointProfile, *, client_cache: HttpClientCache | None = None
 ) -> ModelPort:
     """服务端预设档案的入口——HTTP 客户端取自进程级缓存，调用方不必收尾。"""
+
+    # 缓存以 base_url 为键，装不下「同一个 base_url、两种地址解释」这件事，而钩子
+    # 是装在客户端上的。自定义档案必须走 model_port_scope(shared_client=False)。
+    if profile.address_mode != "sdk_native":
+        raise ValueError("自定义地址模式的档案不能使用共享客户端缓存")
 
     cache = client_cache if client_cache is not None else _default_client_cache
     http_client: httpx.AsyncClient | httpx2.AsyncClient = (

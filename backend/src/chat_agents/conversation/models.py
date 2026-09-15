@@ -1,8 +1,7 @@
-"""Conversation DTOs and the JSON representation used by ``app.message``.
+"""对话 DTO 以及 ``app.message`` 使用的 JSON 表示。
 
-The ORM rows remain declared in :mod:`chat_agents.db.app`; this module owns the
-conversation capability's boundary types and the protocol-neutral content
-encoding used by that table.
+ORM rows 仍声明在 :mod:`chat_agents.db.app` 中；本模块拥有对话能力的边界类型
+以及该表使用的协议中立内容编码。
 """
 
 from __future__ import annotations
@@ -30,7 +29,7 @@ from ..validation import MAX_MESSAGE_LENGTH, MAX_TITLE_LENGTH, validate_non_blan
 
 
 class SessionSummary(BaseModel):
-    """Fields used by the public session list."""
+    """公开会话列表所使用的字段。"""
 
     id: UUID
     title: str | None
@@ -40,7 +39,7 @@ class SessionSummary(BaseModel):
 
 
 class SessionView(BaseModel):
-    """Business fields used by a session detail response."""
+    """会话详情响应所使用的业务字段。"""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -52,7 +51,7 @@ class SessionView(BaseModel):
 
 
 class MessageView(BaseModel):
-    """A stored message, without observability data."""
+    """已存储的消息（不包含可观测性数据）。"""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -115,7 +114,7 @@ def _encode_block(block: ContentBlock) -> dict[str, Any] | None:
 
 
 def encode_content(message: ModelMessage) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Encode a domain message into table content and opaque payload blocks."""
+    """将领域消息编码为数据表 content 块以及 opaque payload 块。"""
 
     content: list[dict[str, Any]] = []
     opaque: list[dict[str, Any]] = []
@@ -161,7 +160,7 @@ def decode_message(
     round_trip_payload: Mapping[str, Any] | list[Mapping[str, Any]] | None = None,
     include_round_trip: bool = True,
 ) -> ModelMessage:
-    """Decode a row without ever creating a ``system`` message."""
+    """解码数据行，且绝不创建 ``system`` 消息。"""
 
     if role not in {"user", "assistant", "tool"}:
         raise ValueError(f"Stored conversation role is invalid: {role!r}")

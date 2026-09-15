@@ -1,6 +1,6 @@
 # 原生推理是两样东西，不是一个字段
 
-[#15](https://github.com/EllisYuan/ChatAgents/issues/15) 的实测在响应体里抓到一个规范外字段 `reasoning_content`：`gpt-5.4` 返回一句摘要，gemini 路径返回整段思维链正文。当时记下的判断是「同一个字段名，两种截然不同的量级」，于是本题被写成一道三选一——采不采、存[消息](../../CONTEXT.md)表还是存[跨度](../../CONTEXT.md)、发不发前端。
+[#15](https://github.com/EllisYuan/ChatAgents/issues/15) 的实测在响应体里抓到一个规范外字段 `reasoning_content`：`gpt-5.4` 返回一句摘要，gemini 路径返回整段思维链正文。这一发现把「同一个字段名，两种截然不同的量级」的问题摆上台面，本题因此被写成一道三选一——采不采、存[消息](../../CONTEXT.md)表还是存[跨度](../../CONTEXT.md)、发不发前端。**下文的决策在本 ADR 写就（2026-08-11）时已经确定，完全由协议规范推导得出，当时尚无实测数据佐证**；代码落地见 PR #45（2026-08-17，commit `4f3980`），实测验证见 [#38](https://github.com/EllisYuan/ChatAgents/issues/38)（2026-08-16/17）。
 
 **这个题面是错的。** 三家协议加两份规范，四处独立地把它建模成两样东西：
 
@@ -22,6 +22,8 @@ Anthropic 官方："when you return tool results, you **must** pass the thinking
 存法是**按[协议](../../CONTEXT.md)原样存放的不透明附件**：不解析、不翻译、原样进原样出。这与三协议各自建模互不翻译同构，不透明块正是「不翻译」的极端情形。
 
 OpenAI Responses 侧官方措辞是 "highly recommend" 而非强制，但 `store: false` 下 reasoning item 默认带 `encrypted_content`，形态与处置完全一致，不为它单开一条路径。
+
+Responses 的不透明附件按协议原样保留整个 reasoning item 信封：`type`、`id`、`encrypted_content` 与必需的 `summary` 字段。`summary` 即使为空数组也不能删除，因为它是 schema 的结构性字段；这里保留字段不等于把摘要正文当作模型可见的对话内容。摘要正文仍只进观测跨度，不进消息表的普通内容。
 
 ## 显示摘要进跨度
 

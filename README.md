@@ -404,7 +404,18 @@ endpoints:
     main_model: claude-sonnet-4-5-20250929
 ```
 
-`base_url` 可以指向任意中转站——「支持自定义 base URL」是硬需求，不是附赠功能。`auth_field` 可配，因为不同中转站期待的 header 名不一样。
+`base_url` 可以指向任意中转站。服务端预设这一层沿用各 SDK 的原生约定（如上：Anthropic 官方填根地址，OpenAI 官方填 `/v1`）。
+
+**前端高级选项里的自定义端点则有两种地址模式**，由「完整 URL」开关切换，默认关闭：
+
+| 模式 | 填什么 | 清单 | 生成 |
+|---|---|---|---|
+| 默认 | 服务根地址，如 `https://api.example.com` | `/v1/models` | `/v1/responses`、`/v1/chat/completions`、`/v1/messages` |
+| 完整 URL | 最终生成地址，如 `https://api.example.com/custom/infer` | 认得出资源后缀才推得出 | 原样使用 |
+
+默认模式下**只有根地址会自动补 `/v1`**；已经写了路径的地址（`/gateway/v1`、`/compatible`）原样作为 API 前缀使用，三种 protocol 共用同一前缀。完整 URL 模式一个字符都不追加，适合非标准网关；若地址不以该 protocol 的资源路径结尾，模型清单地址就推不出来，界面会提示手填模型标识，并且**不会试探其它路径**。
+
+地址不接受用户凭据、query 或 fragment（包括空 `?` / `#`）。`auth_field` 可配，因为不同中转站期待的 header 名不一样。模型清单获取成功不保证生成调用可用。具体决定见 [ADR-0016](./docs/adr/0016-the-model-list-is-discovered-and-persisted.md)。
 
 ### 版本号
 

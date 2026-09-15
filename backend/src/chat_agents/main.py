@@ -312,6 +312,7 @@ async def refresh_models(
             base_url=request.base_url,
             auth_field=request.auth_field,
             api_key=request.api_key,
+            address_mode=request.address_mode,
         )
         catalog = await service.refresh_custom(profile)
         return ModelRefreshResponse(

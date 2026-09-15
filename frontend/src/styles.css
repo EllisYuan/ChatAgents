@@ -125,9 +125,28 @@ h1 span { display: block; color: var(--warm); font-style: italic; }
 .advanced-hint { margin: 0; color: var(--muted); font-size: 0.64rem; }
 .advanced-hint--offlist { color: var(--warm); }
 .advanced-hint--error { color: var(--danger); }
+.advanced-hint--warning { color: var(--warm); }
 .advanced-hint--fallback { display: flex; align-items: center; gap: 0.5rem; }
 .fallback-badge { border: 1px solid var(--warm); padding: 0.1rem 0.4rem; color: var(--warm); font-size: 0.56rem; letter-spacing: 0.08em; text-transform: uppercase; }
 .custom-endpoint-fields { display: flex; flex-direction: column; gap: 0.5rem; align-items: stretch; }
+/* 地址模式开关——沿用分段控件的语气，不引入新的视觉语言。 */
+.full-url-switch { display: inline-flex; align-self: flex-start; align-items: center; gap: 0.45rem; border: 0; padding: 0; background: transparent; color: var(--muted); font-size: 0.62rem; letter-spacing: 0.04em; transition: color 140ms ease; }
+.full-url-switch:hover:not(:disabled) { color: var(--ink); }
+.full-url-switch--on { color: var(--signal); }
+.full-url-switch-track { position: relative; width: 1.7rem; height: 0.85rem; border: 1px solid var(--line); transition: border-color 140ms ease; }
+.full-url-switch--on .full-url-switch-track { border-color: var(--signal); }
+.full-url-switch-track::after { position: absolute; top: 0.1rem; left: 0.1rem; width: 0.55rem; height: 0.55rem; background: var(--muted); content: ""; transition: transform 140ms ease, background-color 140ms ease; }
+.full-url-switch--on .full-url-switch-track::after { background: var(--signal); transform: translateX(0.75rem); }
+.advanced-slot-label-row { display: flex; align-items: center; gap: 0.4rem; }
+
+/* 说明气泡——常驻的只是触发器，内容悬浮时才占屏幕（issue: base URL 帮助文字改为 Info Tooltip）。 */
+.info-tooltip { position: relative; display: inline-flex; flex: none; }
+.info-tooltip-trigger { display: grid; flex: none; width: 0.78rem; height: 0.78rem; place-items: center; border: 1px solid var(--muted); border-radius: 50%; background: transparent; padding: 0; color: var(--muted); font-size: 0.5rem; font-style: italic; line-height: 1; transition: color 140ms ease, border-color 140ms ease; }
+.info-tooltip-trigger:hover, .info-tooltip-trigger:focus-visible, .info-tooltip-trigger[aria-expanded="true"] { color: var(--signal); border-color: var(--signal); }
+.info-tooltip-panel { position: absolute; z-index: 20; top: calc(100% + 0.4rem); left: 0; display: flex; flex-direction: column; gap: 0.3rem; width: 14rem; border: 1px solid var(--line); background: var(--panel); padding: 0.5rem 0.6rem; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35); }
+.info-tooltip-panel[hidden] { display: none; }
+.info-tooltip-panel .advanced-hint { font-size: 0.6rem; line-height: 1.35; }
+.info-tooltip-panel code { color: var(--ink); font-family: "IBM Plex Mono", "Cascadia Code", monospace; font-size: 0.9em; overflow-wrap: anywhere; }
 
 /*
   下拉的展开列表由操作系统绘制，不继承 :root 的深色——不显式给 option 上色
