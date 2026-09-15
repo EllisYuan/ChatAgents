@@ -98,9 +98,13 @@ async def encode_sse(
     session_id: UUID,
     run_id: str,
     role: Literal["main"] = "main",
-    model: str,
 ) -> AsyncIterator[str]:
-    """把一次运行的领域事件流编码成 AG-UI over SSE 的线上字符串流。"""
+    """把一次运行的领域事件流编码成 AG-UI over SSE 的线上字符串流。
+
+    ``usage`` 载荷里的模型标识取自事件本身（``IterationStarted.model`` /
+    ``TitleGenerationStarted.model``），与跨度、与真实调用同源（issue #82）——
+    用量归属要可信，三者就不能各有各的来源。
+    """
 
     thread_id = str(session_id)
     yield _emit(RunStartedEvent(type=EventType.RUN_STARTED, thread_id=thread_id, run_id=run_id))
@@ -113,6 +117,7 @@ async def encode_sse(
     tool_started_at: dict[str, float] = {}
     title_started_at: float | None = None
     title_model: str | None = None
+    main_model: str | None = None
 
     try:
         async for event in events:
@@ -122,6 +127,10 @@ async def encode_sse(
                     title_started_at = time.monotonic()
 
                 case TitleGenerated(session_id=title_session_id, title=title, usage=usage):
+                    # 标题调用必然先发过 TitleGenerationStarted（runner 里两者同处
+                    # 一个分支），模型标识因此一定已经到手——拿不到是程序错误，不是
+                    # 该用空串糊过去的缺失态。
+                    assert title_model is not None
                     title_usage = usage or Usage(
                         state="unavailable",
                         input_tokens=None,
@@ -148,7 +157,7 @@ async def encode_sse(
                             name="chatagents.usage",
                             value=UsagePayload(
                                 role="auxiliary",
-                                model=title_model or model,
+                                model=title_model,
                                 usage_status=title_usage.state,
                                 input_tokens=title_usage.input_tokens,
                                 output_tokens=title_usage.output_tokens,
@@ -169,7 +178,8 @@ async def encode_sse(
                         )
                     )
 
-                case IterationStarted(iteration=iteration):
+                case IterationStarted(iteration=iteration, model=iteration_model):
+                    main_model = iteration_model
                     current_assistant_id = assistant_message_id(run_id, iteration)
                     current_reasoning_id = reasoning_message_id(run_id, iteration)
                     text_open = False
@@ -231,6 +241,8 @@ async def encode_sse(
                     )
 
                 case IterationCompleted(iteration=iteration, usage=usage):
+                    # 同上：IterationStarted 必然在前，模型标识一定已经到手。
+                    assert main_model is not None
                     if reasoning_open:
                         assert current_reasoning_id is not None
                         async for frame in _close_reasoning(current_reasoning_id):
@@ -253,7 +265,7 @@ async def encode_sse(
                             name="chatagents.usage",
                             value=UsagePayload(
                                 role=role,
-                                model=model,
+                                model=main_model,
                                 usage_status=usage.state,
                                 input_tokens=usage.input_tokens,
                                 output_tokens=usage.output_tokens,

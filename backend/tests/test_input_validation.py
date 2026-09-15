@@ -5,7 +5,7 @@ from uuid import uuid4
 import pytest
 from chat_agents.api_models import ModelRefreshRequest
 from chat_agents.conversation.models import RenameSessionRequest, UserMessageRequest
-from chat_agents.llm.user_config import UserEndpointConfig
+from chat_agents.llm.override import ModelOverride
 from chat_agents.tools.web_reader.orchestration import parse_section_indices
 from chat_agents.validation import MAX_MESSAGE_LENGTH, MAX_TITLE_LENGTH
 from pydantic import ValidationError
@@ -31,18 +31,18 @@ def test_model_refresh_requires_a_complete_custom_endpoint() -> None:
         ModelRefreshRequest(base_url="https://example.com", api_key=" ")
 
 
-def test_user_endpoint_config_validates_url_and_model_shape() -> None:
+def test_model_override_validates_url_and_model_shape() -> None:
     valid = {
         "base_url": "https://example.com/v1",
         "auth_field": "Authorization",
         "api_key": "key",
         "main_model": "model-name/latest",
     }
-    assert UserEndpointConfig(**valid).main_model == "model-name/latest"
+    assert ModelOverride(**valid).main_model == "model-name/latest"
     with pytest.raises(ValidationError):
-        UserEndpointConfig(**{**valid, "base_url": "ftp://example.com"})
+        ModelOverride(**{**valid, "base_url": "ftp://example.com"})
     with pytest.raises(ValidationError):
-        UserEndpointConfig(**{**valid, "main_model": "model name"})
+        ModelOverride(**{**valid, "main_model": "model name"})
 
 
 def test_section_rejects_values_outside_positive_unique_range() -> None:

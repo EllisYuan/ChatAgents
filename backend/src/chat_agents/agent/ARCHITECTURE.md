@@ -22,6 +22,7 @@
 2. 工具调用只能从 `ToolExecutor` 发出，不能在 Runner 或工具实现外另开旁路。
 3. 系统提示词是运行配置，不进入消息表。
 4. `RunEvent` 不携带 SSE 帧或供应商协议格式。
+5. 本次调用实际使用的模型随 `IterationStarted` / `TitleGenerationStarted` 事件带出——跨度与用量载荷都读事件，不各自从配置取值。
 
 ## 决策来源
 

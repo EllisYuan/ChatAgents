@@ -51,10 +51,32 @@ class ModelProfileView(BaseModel):
     reason: str | None = None
 
 
-class ModelProfilesResponse(BaseModel):
-    """服务端已配置的全部端点档案及其可用性（issue #70：前端选单需要枚举档案）。"""
+class ModelProfileChoice(ModelProfileView):
+    """档案枚举里的一项——档案层状态，加上它会用哪两个模型（issue #82）。
 
-    profiles: list[ModelProfileView] = Field(default_factory=list)
+    模型标识只在这个响应里出现，不加进 ``ModelProfileView``：清单响应里的那个
+    ``profile`` 字段答的是「这份档案能不能用」，模型标识对它是**结构性不存在**，
+    摆一个恒为 ``null`` 的字段会让读者以为「这次没取到、下次可能有」（ADR-0023）。
+
+    这里的两个字段则是「可能没有值」：``unavailable`` 的档案连密钥都没配，谈不上
+    会用哪个模型，此时为 ``None``——``status`` 就是它自己的可用性状态字段，不必再
+    配第二个。它们是 ``endpoints.yaml`` 里的配置不是密钥，不涉及 ADR-0029。
+    """
+
+    main_model: str | None = None
+    auxiliary_model: str | None = None
+
+
+class ModelProfilesResponse(BaseModel):
+    """服务端已配置的全部端点档案及其可用性（issue #70：前端选单需要枚举档案）。
+
+    ``default_profile`` 让前端能判断「用户选的档案是否偏离默认」，据此决定要不要
+    在运行请求里带上档案覆盖（issue #82）——没有它，前端只能靠「列表第一个就是
+    默认」这类猜测，而那与服务端的 ``default_profile`` 并无关系。
+    """
+
+    profiles: list[ModelProfileChoice] = Field(default_factory=list)
+    default_profile: str
 
 
 class ModelsResponse(BaseModel):

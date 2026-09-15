@@ -33,6 +33,7 @@ from .agent.runner import AgentRunner
 from .api_models import (
     HealthResponse,
     ModelItemView,
+    ModelProfileChoice,
     ModelProfilesResponse,
     ModelProfileView,
     ModelRefreshRequest,
@@ -51,6 +52,7 @@ from .exceptions import AuthenticationFailed, ChatAgentsError, ProtocolError
 from .llm.effort import EffortTier
 from .llm.errors import ProfileUnavailableError
 from .llm.model_discovery import ModelDiscoveryService, model_discovery_lifespan
+from .llm.override import ModelOverride
 from .llm.profile import EndpointProfile
 from .llm.resolve import resolve_profiles
 from .llm.server_config import build_available_profiles, load_server_endpoints
@@ -123,10 +125,11 @@ app.openapi = _custom_openapi
 
 
 class RunRequest(BaseModel):
-    """``POST /api/runs`` 的最小请求体（本票范围内，见 execution-plan #59）。
+    """``POST /api/runs`` 的请求体。
 
-    只支持服务端默认档案，不吃 BYOK/自定义端点覆盖——那是 REST 契约票 #59
-    的范围，这里先打通「一条 POST 端点跑通完整流式运行」这条链路。
+    ``model_override`` 是可选的——不传就是「用服务端预设的一切」，行为与它存在
+    之前完全一致（issue #82）。传了则逐字段覆盖，覆盖只活这一次运行：不落库、
+    不进会话行、不进任何进程级缓存，因此多个访客之间没有共享状态可踩。
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -134,6 +137,7 @@ class RunRequest(BaseModel):
     session_id: UUID
     message: str = Field(min_length=1, max_length=MAX_MESSAGE_LENGTH)
     effort: EffortTier = "medium"
+    model_override: ModelOverride | None = None
 
     @field_validator("message")
     @classmethod
@@ -242,15 +246,21 @@ async def list_model_profiles() -> ModelProfilesResponse:
 
     config, available, unavailable = await _default_profile_context()
     return ModelProfilesResponse(
+        default_profile=config.default_profile,
         profiles=[
-            ModelProfileView(name=name, status="available")
+            ModelProfileChoice(
+                name=name,
+                status="available",
+                main_model=config.profiles[name].main_model,
+                auxiliary_model=config.profiles[name].auxiliary_model,
+            )
             for name in config.profiles
             if name in available
         ]
         + [
-            ModelProfileView(name=name, status="unavailable", reason=profile.reason)
+            ModelProfileChoice(name=name, status="unavailable", reason=profile.reason)
             for name, profile in unavailable.items()
-        ]
+        ],
     )
 
 
@@ -362,7 +372,7 @@ async def create_run(
 
     try:
         server_config = load_server_endpoints(settings.endpoints_config_path)
-        resolved = resolve_profiles(server_config)
+        resolved = resolve_profiles(server_config, request.model_override)
     except ProfileUnavailableError as exc:
         # 密钥未配置——运行时错误，不是启动期结构错误（llm/errors.py 的 docstring）。
         raise AuthenticationFailed(str(exc)) from exc
@@ -383,6 +393,12 @@ async def create_run(
 
     run_id = str(uuid4())
     http_client = httpx.AsyncClient()
+    # 访客自带的中转站不进进程级客户端缓存（issue #82）——它按 base URL 为键、容量
+    # 只有 8，访客一多就互相淘汰，且淘汰时不关客户端。ADR-0016 的「访客的东西不进
+    # 全局设施」在这里的第二次落地。
+    custom_endpoint = (
+        request.model_override is not None and request.model_override.is_custom_endpoint
+    )
 
     async def stream() -> AsyncIterator[str]:
         try:
@@ -396,6 +412,7 @@ async def create_run(
                 run_id=run_id,
                 session_id=request.session_id,
                 generate_title=title_claimed,
+                shared_model_client=not custom_endpoint,
             )
             scope_service = object.__new__(ConversationService)
             async with scope_service.round_trip_payload_scope(
@@ -413,18 +430,16 @@ async def create_run(
                     session_id=request.session_id,
                     trigger_message_id=user_message_id,
                     effort=request.effort,
-                    model=resolved.main_model,
                     protocol=resolved.profile.protocol,
+                    key_source=resolved.key_source,
+                    auxiliary_model_source=resolved.auxiliary_model_source,
                     retention_window=projection.retention_window,
                     run_attributes=projection.attributes,
                     expect_title=title_claimed,
                     session_factory=session_factory,
                 )
                 async for frame in encode_sse(
-                    observed,
-                    session_id=request.session_id,
-                    run_id=run_id,
-                    model=resolved.main_model,
+                    observed, session_id=request.session_id, run_id=run_id
                 ):
                     yield frame
         finally:

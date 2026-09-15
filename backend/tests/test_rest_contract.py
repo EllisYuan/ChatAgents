@@ -112,6 +112,8 @@ def test_models_contract_distinguishes_unavailable_profile_from_empty_catalog(
         assert response.status_code == 200
         body = response.json()
         assert body["source"] == "fallback"
+        # 清单响应里的 profile 只答「这份档案能不能用」，模型标识对它是结构性不
+        # 存在，因此根本不出现（ADR-0023）——那两个字段只在档案枚举响应里有。
         assert body["profile"] == {
             "name": "anthropic-official",
             "status": "unavailable",
@@ -133,15 +135,26 @@ def test_model_profiles_lists_available_and_unavailable(monkeypatch: Any) -> Non
         async with _client() as client:
             response = await client.get("/api/models/profiles")
         assert response.status_code == 200
+        # 可用档案回显 endpoints.yaml 里的模型标识，供前端预填输入框；`default_profile`
+        # 是前端判断「档案是否偏离默认」的参照物（issue #82）。
         assert response.json() == {
+            "default_profile": "anthropic-official",
             "profiles": [
-                {"name": "anthropic-official", "status": "available", "reason": None},
+                {
+                    "name": "anthropic-official",
+                    "status": "available",
+                    "reason": None,
+                    "main_model": "claude-sonnet-5",
+                    "auxiliary_model": None,
+                },
                 {
                     "name": "openai-official",
                     "status": "unavailable",
                     "reason": "环境变量 OPENAI_API_KEY 未设置",
+                    "main_model": None,
+                    "auxiliary_model": None,
                 },
-            ]
+            ],
         }
 
     asyncio.run(scenario())

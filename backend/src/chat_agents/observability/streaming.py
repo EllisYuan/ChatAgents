@@ -27,6 +27,7 @@ from ..agent.events import (
     title_span_id,
     tool_span_id,
 )
+from ..llm.resolve import AuxiliaryModelSource, KeySource
 from .reasoning import reasoning_attributes
 from .writer import RunWriter
 
@@ -63,15 +64,21 @@ async def observe(
     trigger_message_id: UUID,
     effort: str | None,
     role: Literal["main"] = "main",
-    model: str,
     protocol: str | None = None,
+    key_source: KeySource | None = None,
+    auxiliary_model_source: AuxiliaryModelSource | None = None,
     retention_window: int | None = None,
     run_attributes: dict[str, Any] | None = None,
     session_factory: Any,
     expect_title: bool = False,
 ) -> AsyncIterator[RunEvent]:
     """透传事件，并记录主模型跨度、auxiliary 标题兄弟跨度、以及挂在当前迭代
-    模型跨度下的工具跨度（issue #69）。"""
+    模型跨度下的工具跨度（issue #69）。
+
+    跨度的模型列一律取自事件（``IterationStarted.model`` / ``TitleGenerationStarted
+    .model``），不从入参取——跨度记的必须是**实际发出去的那个**模型，而不是解析时
+    以为的那个（issue #82）。``close_span`` 不写模型列，此后没有纠正点。
+    """
 
     writer = RunWriter(session_factory=session_factory)
     run_id: str | None = None
@@ -89,6 +96,15 @@ async def observe(
     terminal = False
     main_attributes: dict[str, Any] = {"protocol": protocol} if protocol is not None else {}
     title_attributes: dict[str, Any] = {"protocol": protocol} if protocol is not None else {}
+    if key_source is not None:
+        # ADR-0029：密钥来源是观测事实，值得记，只是没有 UI 读它——成本归属需要
+        # 时从跨度里按它分组查得出来。记的是来源，不是密钥本身。
+        main_attributes["key_source"] = key_source
+        title_attributes["key_source"] = key_source
+    if auxiliary_model_source is not None:
+        # ADR-0014：auxiliary 回落必须留痕。用户填了一个不存在的标识时回落是静默
+        # 发生的，不记下来他会以为用的就是自己填的那个。
+        title_attributes["auxiliary_model_source"] = auxiliary_model_source
     main_reasoning: list[str] = []
     title_reasoning: list[str] = []
 
@@ -145,7 +161,7 @@ async def observe(
                     name="model_call",
                     kind="llm",
                     role=role,
-                    model=model,
+                    model=event.model,
                     attributes=main_attributes,
                 )
 

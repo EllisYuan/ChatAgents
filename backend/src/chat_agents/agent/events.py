@@ -69,10 +69,16 @@ def tool_span_id(run_id: str, tool_call_id: str) -> UUID:
 
 @dataclass(frozen=True, slots=True)
 class IterationStarted:
-    """一次迭代边界及本次运行采用的输入配置版本指代。"""
+    """一次迭代边界、本次调用实际发出的模型，以及采用的输入配置版本指代。
+
+    ``model`` 带在事件上而不是让下游各自从配置里取（issue #82）：跨度的模型列、
+    ``usage`` 载荷的模型、真实发给上游的模型，三者必须是同一个值，而「记得三处
+    都改」不是一种结构保证。事件是唯一来源，与 ``TitleGenerationStarted`` 一致。
+    """
 
     run_id: str
     iteration: int
+    model: str
     prompt_version_id: str | None = None
     tool_schema_version_id: str | None = None
 

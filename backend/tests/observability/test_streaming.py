@@ -66,7 +66,7 @@ def test_observe_writes_run_and_span_incrementally_on_completion() -> None:
 
             source = _events(
                 [
-                    IterationStarted(run_id=run_id, iteration=1),
+                    IterationStarted(run_id=run_id, iteration=1, model="test-model"),
                     IterationCompleted(
                         run_id=run_id,
                         iteration=1,
@@ -85,7 +85,6 @@ def test_observe_writes_run_and_span_incrementally_on_completion() -> None:
                     session_id=session_id,
                     trigger_message_id=trigger_id,
                     effort="medium",
-                    model="gpt",
                     session_factory=factory,
                 )
             ]
@@ -102,7 +101,9 @@ def test_observe_writes_run_and_span_incrementally_on_completion() -> None:
                 ).scalar_one()
                 assert span.status == "ok"
                 assert span.role == "main"
-                assert span.model == "gpt"
+                # 跨度的模型列取自 IterationStarted 事件，不取自 observe 的入参
+                # ——记的必须是实际发出去的那个（issue #82）。
+                assert span.model == "test-model"
                 assert span.input_tokens == 3
                 assert span.output_tokens == 4
                 assert span.usage_status == "complete"
@@ -124,7 +125,7 @@ def test_observe_persists_tool_span_parented_to_iteration_span_on_success() -> N
 
             source = _events(
                 [
-                    IterationStarted(run_id=run_id, iteration=1),
+                    IterationStarted(run_id=run_id, iteration=1, model="test-model"),
                     # 真实顺序（见 agent/runner.py）：模型跨度先随 IterationCompleted
                     # 关闭，工具调用才开始——工具跨度的父跨度不能靠一个「模型跨度
                     # 还开着」的假设去接，必须在关闭之后仍记得它的 id。
@@ -159,7 +160,6 @@ def test_observe_persists_tool_span_parented_to_iteration_span_on_success() -> N
                 session_id=session_id,
                 trigger_message_id=trigger_id,
                 effort="medium",
-                model="gpt",
                 session_factory=factory,
             ):
                 pass
@@ -193,7 +193,7 @@ def test_observe_marks_tool_span_error_when_structured_is_none() -> None:
 
             source = _events(
                 [
-                    IterationStarted(run_id=run_id, iteration=1),
+                    IterationStarted(run_id=run_id, iteration=1, model="test-model"),
                     IterationCompleted(
                         run_id=run_id,
                         iteration=1,
@@ -225,7 +225,6 @@ def test_observe_marks_tool_span_error_when_structured_is_none() -> None:
                 session_id=session_id,
                 trigger_message_id=trigger_id,
                 effort="medium",
-                model="gpt",
                 session_factory=factory,
             ):
                 pass
@@ -252,7 +251,7 @@ def test_observe_closes_open_tool_span_as_partial_on_client_disconnect() -> None
 
             source = _events(
                 [
-                    IterationStarted(run_id=run_id, iteration=1),
+                    IterationStarted(run_id=run_id, iteration=1, model="test-model"),
                     IterationCompleted(
                         run_id=run_id,
                         iteration=1,
@@ -275,7 +274,6 @@ def test_observe_closes_open_tool_span_as_partial_on_client_disconnect() -> None
                 session_id=session_id,
                 trigger_message_id=trigger_id,
                 effort="medium",
-                model="gpt",
                 session_factory=factory,
             )
             await anext(wrapped)
@@ -307,7 +305,7 @@ def test_observe_marks_aborted_and_partial_on_client_disconnect() -> None:
 
             source = _events(
                 [
-                    IterationStarted(run_id=run_id, iteration=1),
+                    IterationStarted(run_id=run_id, iteration=1, model="test-model"),
                     RunFailed(run_id=run_id, iteration=99, reason="never reached"),
                 ]
             )
@@ -317,7 +315,6 @@ def test_observe_marks_aborted_and_partial_on_client_disconnect() -> None:
                 session_id=session_id,
                 trigger_message_id=trigger_id,
                 effort="medium",
-                model="gpt",
                 session_factory=factory,
             )
             first = await anext(wrapped)
@@ -349,7 +346,7 @@ def test_observe_marks_failed_not_aborted_when_upstream_raises() -> None:
             run_id = str(uuid4())
 
             async def failing() -> AsyncIterator[RunEvent]:
-                yield IterationStarted(run_id=run_id, iteration=1)
+                yield IterationStarted(run_id=run_id, iteration=1, model="test-model")
                 raise RuntimeError("db write failed")
 
             wrapped = observe(
@@ -357,7 +354,6 @@ def test_observe_marks_failed_not_aborted_when_upstream_raises() -> None:
                 session_id=session_id,
                 trigger_message_id=trigger_id,
                 effort="medium",
-                model="gpt",
                 session_factory=factory,
             )
             with pytest.raises(RuntimeError, match="db write failed"):
@@ -384,7 +380,7 @@ def test_observe_write_failure_does_not_propagate_to_the_stream() -> None:
             message = ModelMessage(role="assistant", content=(TextBlock(text="ok"),))
             source = _events(
                 [
-                    IterationStarted(run_id=run_id, iteration=1),
+                    IterationStarted(run_id=run_id, iteration=1, model="test-model"),
                     IterationCompleted(
                         run_id=run_id,
                         iteration=1,
@@ -402,7 +398,6 @@ def test_observe_write_failure_does_not_propagate_to_the_stream() -> None:
                     session_id=uuid4(),
                     trigger_message_id=uuid4(),
                     effort="medium",
-                    model="gpt",
                     session_factory=factory,
                 )
             ]
