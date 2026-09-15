@@ -175,6 +175,9 @@ def test_observe_persists_tool_span_parented_to_iteration_span_on_success() -> N
                 assert span.parent_span_id == llm_span_id(run_id, 1)
                 assert span.attributes["result"] == "找到了"
                 assert span.attributes["structured"] == {"result_count": 1}
+                # 入参只在 ToolStarted 上出现过，闭合时的事件不再带它——写入口必须
+                # 保住开启时那份属性，否则 Trace 面板的入参展示恒为空。
+                assert span.attributes["arguments"] == {"query": "x"}
                 assert span.ended_at is not None
 
     asyncio.run(scenario())
@@ -236,6 +239,8 @@ def test_observe_marks_tool_span_error_when_structured_is_none() -> None:
                     )
                 ).scalar_one()
                 assert span.status == "error"
+                # 失败的工具调用尤其要留住入参——排查外部失败靠的就是它。
+                assert span.attributes["arguments"] == {"query": "x"}
 
     asyncio.run(scenario())
 
