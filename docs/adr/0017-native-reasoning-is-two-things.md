@@ -1,6 +1,6 @@
 # 原生推理是两样东西，不是一个字段
 
-[#15](https://github.com/EllisYuan/ChatAgents/issues/15) 的实测在响应体里抓到一个规范外字段 `reasoning_content`：`gpt-5.4` 返回一句摘要，gemini 路径返回整段思维链正文。当时记下的判断是「同一个字段名，两种截然不同的量级」，于是本题被写成一道三选一——采不采、存[消息](../../CONTEXT.md)表还是存[跨度](../../CONTEXT.md)、发不发前端。
+[#15](https://github.com/EllisYuan/ChatAgents/issues/15) 的实测在响应体里抓到一个规范外字段 `reasoning_content`：`gpt-5.4` 返回一句摘要，gemini 路径返回整段思维链正文。这一发现把「同一个字段名，两种截然不同的量级」的问题摆上台面，本题因此被写成一道三选一——采不采、存[消息](../../CONTEXT.md)表还是存[跨度](../../CONTEXT.md)、发不发前端。**下文的决策在本 ADR 写就（2026-08-11）时已经确定，完全由协议规范推导得出，当时尚无实测数据佐证**；代码落地见 PR #45（2026-08-17，commit `4f3980`），实测验证见 [#38](https://github.com/EllisYuan/ChatAgents/issues/38)（2026-08-16/17）。
 
 **这个题面是错的。** 三家协议加两份规范，四处独立地把它建模成两样东西：
 
