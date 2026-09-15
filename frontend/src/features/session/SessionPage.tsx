@@ -38,7 +38,10 @@ export function SessionPage() {
       return;
     }
     void sendMessage(draft, effort).then((accepted) => {
-      if (accepted) setDraft("");
+      if (accepted) {
+        setDraft("");
+        setAdvancedOpen(false);
+      }
     });
   };
 
