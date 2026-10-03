@@ -115,6 +115,16 @@ h1 span { display: block; color: var(--warm); font-style: italic; }
 .chat-turn--user .chat-turn-role { color: var(--muted); }
 .chat-tool-note { margin: 0.6rem 0 0; color: var(--muted); font-size: 0.68rem; letter-spacing: 0.04em; }
 .chat-error { margin: 0.6rem 0 0; color: var(--warm); font-size: 0.7rem; }
+.chat-edit { margin: 0.5rem 0 0; }
+.chat-edit-input { width: 100%; resize: vertical; border: 1px solid var(--line); background: transparent; color: var(--ink); font: inherit; font-size: 1.05rem; line-height: 1.6; padding: 0.5rem; }
+.chat-edit-actions { display: flex; justify-content: flex-end; gap: 0.9rem; margin-top: 0.5rem; }
+.chat-turn-actions { display: flex; gap: 0.3rem; margin: 0.6rem 0 0; }
+.chat-turn-actions--hover-only { opacity: 0; transition: opacity 160ms ease; }
+.chat-turn:hover .chat-turn-actions--hover-only,
+.chat-turn-actions--hover-only:focus-within { opacity: 1; }
+.icon-button { display: grid; place-items: center; width: 1.5rem; height: 1.5rem; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; transition: color 140ms ease, border-color 140ms ease, background 140ms ease; }
+.icon-button:hover { color: var(--signal); border-color: var(--line); background: color-mix(in srgb, var(--signal) 8%, transparent); }
+.icon-button--confirm { color: var(--signal); }
 .run-summary { margin: 0.7rem 0 0; color: var(--muted); font-size: 0.66rem; letter-spacing: 0.04em; }
 .run-summary--pending { opacity: 0.6; }
 .run-summary-marker { color: var(--signal); }

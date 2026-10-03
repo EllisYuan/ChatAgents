@@ -204,6 +204,40 @@ export function useAgentRun(sessionId: string) {
     abortRef.current?.abort();
   }, [phase, streamingId]);
 
+  const retryTurn = useCallback((messageId: string) => {
+    if (phase === "streaming") return;
+    const idx = messages.findIndex((message) => message.id === messageId);
+    if (idx === -1) return;
+    const target = messages[idx];
+    const userMessage = target.role === "user" ? target : messages[idx - 1];
+    const assistantMessage = target.role === "assistant" ? target : messages[idx + 1];
+    if (!userMessage || userMessage.role !== "user") return;
+    const text = userMessage.text;
+    setMessages((prev) => prev.filter((message) => message.id !== userMessage.id && message.id !== assistantMessage?.id));
+    if (assistantMessage) {
+      setErrors((prev) => omit(prev, assistantMessage.id));
+      setSummaries((prev) => omit(prev, assistantMessage.id));
+      setInterruptedIds((prev) => omit(prev, assistantMessage.id));
+    }
+    void executeSend(text, effort);
+  }, [effort, executeSend, messages, phase]);
+
+  const editMessage = useCallback((userId: string, newText: string) => {
+    if (phase === "streaming") return;
+    const trimmed = newText.trim();
+    if (!trimmed) return;
+    const idx = messages.findIndex((message) => message.id === userId);
+    if (idx === -1 || messages[idx].role !== "user") return;
+    const assistantMessage = messages[idx + 1]?.role === "assistant" ? messages[idx + 1] : undefined;
+    setMessages((prev) => prev.filter((message) => message.id !== userId && message.id !== assistantMessage?.id));
+    if (assistantMessage) {
+      setErrors((prev) => omit(prev, assistantMessage.id));
+      setSummaries((prev) => omit(prev, assistantMessage.id));
+      setInterruptedIds((prev) => omit(prev, assistantMessage.id));
+    }
+    void executeSend(trimmed, effort);
+  }, [effort, executeSend, messages, phase]);
+
   const confirmConfigChoice = useCallback(async (choice: ConfigChoice) => {
     const pending = pendingConfigConfirmation;
     if (!pending) return;
@@ -220,7 +254,7 @@ export function useAgentRun(sessionId: string) {
   return {
     messages, historyLoaded, sessionExists, phase, streamingId, summaries, errors, activeTool,
     traces, runIdBySeq, effort, setEffort, sendMessage, pendingConfigConfirmation,
-    confirmConfigChoice, persistenceWarning, stopStreaming, interruptedIds,
+    confirmConfigChoice, persistenceWarning, retryTurn, editMessage, stopStreaming, interruptedIds,
   };
 }
 

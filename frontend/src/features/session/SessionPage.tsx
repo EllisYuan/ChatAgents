@@ -5,7 +5,7 @@ import { TracePanel } from "../trace/TracePanel";
 import { useUiStore } from "../../stores/ui-store";
 import { AdvancedOptions } from "./AdvancedOptions";
 import { EffortSwitcher } from "./EffortSwitcher";
-import { StopIcon } from "./icons";
+import { CheckIcon, CloseIcon, CopyIcon, EditIcon, RetryIcon, StopIcon } from "./icons";
 import { MessageMarkdown } from "./MessageMarkdown";
 import { ThinkingDots } from "./ThinkingDots";
 import { useAgentRun } from "./useAgentRun";
@@ -30,11 +30,16 @@ export function SessionPage() {
     pendingConfigConfirmation,
     confirmConfigChoice,
     persistenceWarning,
+    retryTurn,
+    editMessage,
     stopStreaming,
     interruptedIds,
   } = useAgentRun(sessionId);
   const [draft, setDraft] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState("");
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -48,6 +53,33 @@ export function SessionPage() {
       }
     });
   };
+
+  const handleCopy = (id: string, text: string) => {
+    void navigator.clipboard.writeText(text).then(() => {
+      setCopiedId(id);
+      setTimeout(() => setCopiedId((current) => (current === id ? null : current)), 1500);
+    });
+  };
+
+  const startEdit = (id: string, text: string) => {
+    setEditingId(id);
+    setEditDraft(text);
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditDraft("");
+  };
+
+  const submitEdit = (id: string) => {
+    if (!editDraft.trim()) return;
+    editMessage(id, editDraft);
+    setEditingId(null);
+    setEditDraft("");
+  };
+
+  const lastIndex = messages.length - 1;
+  const lastTurnUserIndex = messages[lastIndex]?.role === "assistant" ? lastIndex - 1 : lastIndex;
 
   const isEmpty = historyLoaded && messages.length === 0;
 
@@ -80,7 +112,13 @@ export function SessionPage() {
             </div>
           ) : (
             <ol className="chat-thread">
-              {messages.map((message) => (
+              {messages.map((message, index) => {
+                const isLastAssistant = message.role === "assistant" && index === messages.length - 1;
+                const isLastUser = message.role === "user" && index === lastTurnUserIndex;
+                const isSettledAssistant = isLastAssistant && message.id !== streamingId && phase !== "streaming";
+                const isEditableUser = isLastUser && phase !== "streaming";
+                const isEditing = editingId === message.id;
+                return (
                 <li key={message.id} className={`chat-turn chat-turn--${message.role}`}>
                   <span className="chat-turn-role">{message.role === "user" ? "YOU" : "AGENT"}</span>
                   {/*
@@ -94,6 +132,30 @@ export function SessionPage() {
                     ) : (
                       <p className="chat-turn-text">{message.id === streamingId ? <ThinkingDots /> : ""}</p>
                     )
+                  ) : isEditing ? (
+                    <div className="chat-edit">
+                      <textarea
+                        className="chat-edit-input"
+                        value={editDraft}
+                        onChange={(event) => setEditDraft(event.target.value)}
+                        rows={3}
+                        autoFocus
+                      />
+                      <div className="chat-edit-actions">
+                        <button type="button" className="icon-button" title="取消" aria-label="取消" onClick={cancelEdit}>
+                          <CloseIcon size={13} />
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-button icon-button--confirm"
+                          title="保存并重新发送"
+                          aria-label="保存并重新发送"
+                          onClick={() => submitEdit(message.id)}
+                        >
+                          <CheckIcon size={13} />
+                        </button>
+                      </div>
+                    </div>
                   ) : (
                     <p className="chat-turn-text">{message.text}</p>
                   )}
@@ -108,6 +170,59 @@ export function SessionPage() {
                   {message.role === "assistant" && message.id !== streamingId && interruptedIds[message.id] && (
                     <p className="chat-tool-note">▸ 已停止生成</p>
                   )}
+                  {isSettledAssistant && message.text && (
+                    <div className="chat-turn-actions">
+                      <button
+                        type="button"
+                        className={`icon-button${copiedId === message.id ? " icon-button--confirm" : ""}`}
+                        title={copiedId === message.id ? "已复制" : "复制"}
+                        aria-label={copiedId === message.id ? "已复制" : "复制"}
+                        onClick={() => handleCopy(message.id, message.text)}
+                      >
+                        {copiedId === message.id ? <CheckIcon size={13} /> : <CopyIcon size={13} />}
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-button"
+                        title="重试"
+                        aria-label="重试"
+                        onClick={() => retryTurn(message.id)}
+                      >
+                        <RetryIcon size={13} />
+                      </button>
+                    </div>
+                  )}
+                  {isEditableUser && !isEditing && (
+                    <div className="chat-turn-actions chat-turn-actions--hover-only">
+                      <button
+                        type="button"
+                        className={`icon-button${copiedId === message.id ? " icon-button--confirm" : ""}`}
+                        title={copiedId === message.id ? "已复制" : "复制"}
+                        aria-label={copiedId === message.id ? "已复制" : "复制"}
+                        onClick={() => handleCopy(message.id, message.text)}
+                      >
+                        {copiedId === message.id ? <CheckIcon size={13} /> : <CopyIcon size={13} />}
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-button"
+                        title="编辑"
+                        aria-label="编辑"
+                        onClick={() => startEdit(message.id, message.text)}
+                      >
+                        <EditIcon size={13} />
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-button"
+                        title="重试"
+                        aria-label="重试"
+                        onClick={() => retryTurn(message.id)}
+                      >
+                        <RetryIcon size={13} />
+                      </button>
+                    </div>
+                  )}
                   {message.role === "assistant" && (
                     <TracePanel
                       pending={message.id === streamingId}
@@ -117,7 +232,8 @@ export function SessionPage() {
                     />
                   )}
                 </li>
-              ))}
+                );
+              })}
             </ol>
           )}
 
