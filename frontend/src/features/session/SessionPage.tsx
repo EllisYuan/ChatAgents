@@ -38,6 +38,9 @@ export function SessionPage() {
   const [draft, setDraft] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [sentHistory, setSentHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState<number | null>(null);
+  const [draftBeforeHistory, setDraftBeforeHistory] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
 
@@ -46,10 +49,13 @@ export function SessionPage() {
     if (!draft.trim() || phase === "streaming") {
       return;
     }
-    void sendMessage(draft, effort).then((accepted) => {
+    const text = draft;
+    void sendMessage(text, effort).then((accepted) => {
       if (accepted) {
         setDraft("");
         setAdvancedOpen(false);
+        setHistoryIndex(null);
+        setSentHistory((prev) => (prev[prev.length - 1] === text.trim() ? prev : [...prev, text.trim()]));
       }
     });
   };
@@ -281,11 +287,45 @@ export function SessionPage() {
             <textarea
               className="composer-input"
               value={draft}
-              onChange={(event) => setDraft(event.target.value)}
+              onChange={(event) => {
+                setDraft(event.target.value);
+                setHistoryIndex(null);
+              }}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();
                   handleSubmit(event as unknown as FormEvent<HTMLFormElement>);
+                  return;
+                }
+                const el = event.currentTarget;
+                if (event.key === "ArrowUp" && el.selectionStart === 0 && el.selectionEnd === 0) {
+                  if (sentHistory.length === 0) return;
+                  event.preventDefault();
+                  setHistoryIndex((current) => {
+                    const nextIndex = current === null ? sentHistory.length - 1 : Math.max(0, current - 1);
+                    if (current === null) setDraftBeforeHistory(draft);
+                    setDraft(sentHistory[nextIndex]);
+                    return nextIndex;
+                  });
+                  return;
+                }
+                if (
+                  event.key === "ArrowDown" &&
+                  historyIndex !== null &&
+                  el.selectionStart === el.value.length &&
+                  el.selectionEnd === el.value.length
+                ) {
+                  event.preventDefault();
+                  setHistoryIndex((current) => {
+                    if (current === null) return null;
+                    const nextIndex = current + 1;
+                    if (nextIndex >= sentHistory.length) {
+                      setDraft(draftBeforeHistory);
+                      return null;
+                    }
+                    setDraft(sentHistory[nextIndex]);
+                    return nextIndex;
+                  });
                 }
               }}
               placeholder="Ask the agent something precise…"
