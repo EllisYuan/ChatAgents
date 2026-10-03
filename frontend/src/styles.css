@@ -192,6 +192,8 @@ h1 span { display: block; color: var(--warm); font-style: italic; }
 .composer-input:disabled { opacity: 0.5; }
 .composer-submit { display: inline-flex; align-items: center; gap: 0.6rem; border: 1px solid var(--line); padding: 0.55rem 0.8rem; background: transparent; color: var(--signal); font-size: 0.68rem; letter-spacing: 0.04em; white-space: nowrap; transition: border-color 160ms ease; }
 .composer-submit:hover:not(:disabled) { border-color: var(--signal); }
+.composer-submit--stop { color: var(--warm); }
+.composer-submit--stop:hover { border-color: var(--warm); }
 .site-footer { display: flex; justify-content: flex-end; max-width: 1240px; margin: 0 auto; padding: 1.5rem 0 0; }
 .evals-page { padding: clamp(3rem, 8vw, 6rem) 0; animation: rise-in 500ms ease both; }
 .evals-page h1 { max-width: 12ch; font-size: clamp(2.7rem, 6vw, 5rem); }

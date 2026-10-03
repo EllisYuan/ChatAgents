@@ -5,6 +5,7 @@ import { TracePanel } from "../trace/TracePanel";
 import { useUiStore } from "../../stores/ui-store";
 import { AdvancedOptions } from "./AdvancedOptions";
 import { EffortSwitcher } from "./EffortSwitcher";
+import { StopIcon } from "./icons";
 import { MessageMarkdown } from "./MessageMarkdown";
 import { ThinkingDots } from "./ThinkingDots";
 import { useAgentRun } from "./useAgentRun";
@@ -29,6 +30,8 @@ export function SessionPage() {
     pendingConfigConfirmation,
     confirmConfigChoice,
     persistenceWarning,
+    stopStreaming,
+    interruptedIds,
   } = useAgentRun(sessionId);
   const [draft, setDraft] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -102,6 +105,9 @@ export function SessionPage() {
                       运行出错：{errors[message.id]}
                     </p>
                   )}
+                  {message.role === "assistant" && message.id !== streamingId && interruptedIds[message.id] && (
+                    <p className="chat-tool-note">▸ 已停止生成</p>
+                  )}
                   {message.role === "assistant" && (
                     <TracePanel
                       pending={message.id === streamingId}
@@ -171,17 +177,25 @@ export function SessionPage() {
               rows={2}
               disabled={phase === "streaming"}
             />
-            <button
-              className="composer-submit"
-              type="submit"
-              disabled={phase === "streaming" || !draft.trim()}
-              data-busy={phase === "streaming"}
-            >
-              {phase === "streaming" ? "运行中…" : "发送"}
-              <span className="composer-key" aria-hidden="true">
-                ⌘ ↵
-              </span>
-            </button>
+            {phase === "streaming" ? (
+              <button
+                className="composer-submit composer-submit--stop"
+                type="button"
+                title="停止生成"
+                aria-label="停止生成"
+                onClick={stopStreaming}
+              >
+                <StopIcon size={13} />
+                停止
+              </button>
+            ) : (
+              <button className="composer-submit" type="submit" disabled={!draft.trim()}>
+                发送
+                <span className="composer-key" aria-hidden="true">
+                  ⌘ ↵
+                </span>
+              </button>
+            )}
           </form>
         </article>
 

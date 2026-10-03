@@ -39,9 +39,11 @@ export function useAgentRun(sessionId: string) {
   const [pendingConfigConfirmation, setPendingConfigConfirmation] = useState<PendingConfigConfirmation | null>(null);
   const [configChoiceResolved, setConfigChoiceResolved] = useState(false);
   const [persistenceWarning, setPersistenceWarning] = useState<string | null>(null);
+  const [interruptedIds, setInterruptedIds] = useState<Record<string, true>>({});
   const hasSessionConfigRef = useRef(false);
   const { trees: traces, startTrace, handleTraceEvent } = useTraceStream();
   const abortRef = useRef<AbortController | null>(null);
+  const stoppedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -124,6 +126,7 @@ export function useAgentRun(sessionId: string) {
 
       const controller = new AbortController();
       abortRef.current = controller;
+      stoppedRef.current = false;
       let steps = 0;
       let tokens = 0;
       let usageIncomplete = false;
@@ -157,11 +160,14 @@ export function useAgentRun(sessionId: string) {
           controller.signal,
         );
       } catch (error) {
-        if (controller.signal.aborted) return;
-        failed = true;
-        setErrors((prev) => ({ ...prev, [assistantId]: error instanceof Error ? error.message : "连接中断，请重试" }));
+        if (controller.signal.aborted) {
+          if (!stoppedRef.current) return;
+        } else {
+          failed = true;
+          setErrors((prev) => ({ ...prev, [assistantId]: error instanceof Error ? error.message : "连接中断，请重试" }));
+        }
       }
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted && !stoppedRef.current) return;
       setActiveTool(null);
       setPhase("idle");
       setStreamingId(null);
@@ -191,6 +197,13 @@ export function useAgentRun(sessionId: string) {
     return accepted;
   }, [configChoiceResolved, effort, executeSend, phase, sessionExists]);
 
+  const stopStreaming = useCallback(() => {
+    if (phase !== "streaming" || !streamingId) return;
+    stoppedRef.current = true;
+    setInterruptedIds((prev) => ({ ...prev, [streamingId]: true }));
+    abortRef.current?.abort();
+  }, [phase, streamingId]);
+
   const confirmConfigChoice = useCallback(async (choice: ConfigChoice) => {
     const pending = pendingConfigConfirmation;
     if (!pending) return;
@@ -207,7 +220,7 @@ export function useAgentRun(sessionId: string) {
   return {
     messages, historyLoaded, sessionExists, phase, streamingId, summaries, errors, activeTool,
     traces, runIdBySeq, effort, setEffort, sendMessage, pendingConfigConfirmation,
-    confirmConfigChoice, persistenceWarning,
+    confirmConfigChoice, persistenceWarning, stopStreaming, interruptedIds,
   };
 }
 
