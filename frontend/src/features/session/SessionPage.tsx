@@ -6,6 +6,7 @@ import { useUiStore } from "../../stores/ui-store";
 import { AdvancedOptions } from "./AdvancedOptions";
 import { EffortSwitcher } from "./EffortSwitcher";
 import { MessageMarkdown } from "./MessageMarkdown";
+import { ThinkingDots } from "./ThinkingDots";
 import { useAgentRun } from "./useAgentRun";
 
 export function SessionPage() {
@@ -88,7 +89,7 @@ export function SessionPage() {
                     message.text ? (
                       <MessageMarkdown text={message.text} />
                     ) : (
-                      <p className="chat-turn-text">{message.id === streamingId ? "…" : ""}</p>
+                      <p className="chat-turn-text">{message.id === streamingId ? <ThinkingDots /> : ""}</p>
                     )
                   ) : (
                     <p className="chat-turn-text">{message.text}</p>
