@@ -24,7 +24,9 @@ async def _guarded(session_factory: Any, *, op: str, run_id: str, body: Any) -> 
         async with session_factory() as session, session.begin():
             await body(session)
     except Exception as exc:
-        logger.warning("observability.write_failed", op=op, run_id=run_id, error=str(exc))
+        logger.warning(
+            "observability.write_failed", op=op, run_id=run_id, error_type=type(exc).__name__
+        )
 
 
 class RunWriter:
@@ -66,19 +68,26 @@ class RunWriter:
         self,
         *,
         span_id: UUID,
-        run_id: str,
+        run_id: str | None,
         parent_span_id: UUID | None,
         name: str,
         kind: str,
         role: str | None,
         model: str | None,
+        session_id: UUID | None = None,
         attributes: dict[str, Any] | None = None,
     ) -> None:
+        if (run_id is None) == (session_id is None):
+            raise ValueError("span must have exactly one owner")
+        if session_id is not None and parent_span_id is not None:
+            raise ValueError("session-owned span must be a root span")
+
         async def body(session: Any) -> None:
             session.add(
                 Span(
                     id=span_id,
-                    run_id=UUID(run_id),
+                    run_id=UUID(run_id) if run_id is not None else None,
+                    session_id=session_id,
                     parent_span_id=parent_span_id,
                     name=name,
                     kind=kind,
@@ -88,13 +97,18 @@ class RunWriter:
                 )
             )
 
-        await _guarded(self._session_factory, op="open_span", run_id=run_id, body=body)
+        await _guarded(
+            self._session_factory,
+            op="open_span",
+            run_id=run_id or str(session_id),
+            body=body,
+        )
 
     async def close_span(
         self,
         *,
         span_id: UUID,
-        run_id: str,
+        run_id: str | None,
         status: Literal["ok", "error"],
         usage_status: UsageState | None,
         input_tokens: int | None,
@@ -115,7 +129,9 @@ class RunWriter:
                 values["attributes"] = attributes
             await session.execute(update(Span).where(Span.id == span_id).values(**values))
 
-        await _guarded(self._session_factory, op="close_span", run_id=run_id, body=body)
+        await _guarded(
+            self._session_factory, op="close_span", run_id=run_id or "session", body=body
+        )
 
     async def finish_run(
         self, *, run_id: str, status: Literal["completed", "failed", "aborted"]

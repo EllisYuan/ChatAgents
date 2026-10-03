@@ -105,6 +105,10 @@ def typecheck() -> None:
     run(["npm", "run", "typecheck"], cwd=FRONTEND)
 
 
+def ui_test() -> None:
+    run(["npm", "run", "test:title-generation"], cwd=FRONTEND)
+
+
 def build() -> None:
     run(["npm", "run", "build"], cwd=FRONTEND)
 
@@ -123,7 +127,7 @@ def guards() -> None:
 
 
 def check() -> None:
-    for task in (test, contract, lint, typecheck, build, docs, guards):
+    for task in (test, contract, lint, typecheck, ui_test, build, docs, guards):
         task()
 
 
@@ -136,6 +140,7 @@ TASKS = {
     "contract": contract,
     "lint": lint,
     "typecheck": typecheck,
+    "ui-test": ui_test,
     "build": build,
     "docs": docs,
     "guards": guards,

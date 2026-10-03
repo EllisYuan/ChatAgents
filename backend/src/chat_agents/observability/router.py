@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
-from .models import RunDetail, RunSummary, run_detail_payload
+from .models import RunDetail, RunSummary, TitleGenerationObservation, run_detail_payload
 from .repository import ObservabilityRepository
 
 router = APIRouter(prefix="/api", tags=["observability"])
@@ -22,6 +22,13 @@ async def list_session_runs(session_id: UUID, session: Db) -> list[RunSummary]:
     """返回观测侧运行骨架；不会读取 ``app.session`` 或 ``app.message``。"""
 
     return await ObservabilityRepository(session).list_runs(session_id)
+
+
+@router.get("/sessions/{session_id}/title-generation", response_model=TitleGenerationObservation)
+async def get_title_generation(session_id: UUID, session: Db) -> TitleGenerationObservation:
+    """按需查询会话标题跨度，不读取业务标题，也不触发模型调用。"""
+
+    return await ObservabilityRepository(session).get_title_generation(session_id)
 
 
 @router.get("/runs/{run_id}", response_model=RunDetail)

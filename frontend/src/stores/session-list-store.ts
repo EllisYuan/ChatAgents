@@ -9,6 +9,18 @@ import {
 } from "../api/client";
 
 const PAGE_SIZE = 50;
+const pendingRenames = new Set<string>();
+const locallyRenamedSessions = new Set<string>();
+/**
+ * 本地标题写入版本：人工改名与模型标题应用（`applyTitle`）都递增。`refreshSession`
+ * 在发起权威 GET 前捕获，返回后比对——迟到的权威响应不能覆盖在其飞行期间发生的
+ * 本地写入（issue #93：模型标题、人工改名与运行收尾后的刷新三者可能并发）。
+ */
+const localWriteVersions = new Map<string, number>();
+
+function bumpLocalWrite(sessionId: string): void {
+  localWriteVersions.set(sessionId, (localWriteVersions.get(sessionId) ?? 0) + 1);
+}
 
 type SessionListState = {
   sessions: SessionSummary[];
@@ -104,9 +116,10 @@ export const useSessionListStore = create<SessionListState>((set, get) => ({
   },
 
   applyTitle: (sessionId, title) => {
+    bumpLocalWrite(sessionId);
     set((state) => {
       const existing = state.sessions.find((session) => session.id === sessionId);
-      if (!existing) {
+      if (!existing || locallyRenamedSessions.has(sessionId)) {
         return state;
       }
       return { sessions: upsert(state.sessions, { ...existing, title }) };
@@ -114,24 +127,36 @@ export const useSessionListStore = create<SessionListState>((set, get) => ({
   },
 
   refreshSession: async (sessionId) => {
+    // 发起前捕获版本；飞行期间有本地写入时保留标题与时间。已有人工改名
+    // 仅保护标题，后续运行推进的服务端更新时间仍应进入列表。
+    const version = localWriteVersions.get(sessionId) ?? 0;
     const detail = await getSessionDetail(sessionId);
     if (!detail) {
       return;
     }
-    set((state) => ({
-      sessions: upsert(state.sessions, {
-        id: detail.id,
-        title: detail.title,
-        created_at: detail.created_at,
-        updated_at: detail.updated_at,
-        message_count: detail.messages?.length ?? 0,
-      }),
-    }));
+    set((state) => {
+      const existing = state.sessions.find((session) => session.id === sessionId);
+      if (!existing) return state;
+      const changedWhileFetching = pendingRenames.has(sessionId)
+        || version !== (localWriteVersions.get(sessionId) ?? 0);
+      return {
+        sessions: upsert(state.sessions, {
+          id: detail.id,
+          title: changedWhileFetching || locallyRenamedSessions.has(sessionId) ? existing.title : detail.title,
+          created_at: detail.created_at,
+          updated_at: changedWhileFetching ? existing.updated_at : detail.updated_at,
+          message_count: detail.messages?.length ?? 0,
+        }),
+      };
+    });
   },
 
   remove: async (sessionId) => {
     try {
       await deleteSession(sessionId);
+      pendingRenames.delete(sessionId);
+      locallyRenamedSessions.delete(sessionId);
+      localWriteVersions.delete(sessionId);
       set((state) => ({
         sessions: state.sessions.filter((session) => session.id !== sessionId),
         error: null,
@@ -144,6 +169,10 @@ export const useSessionListStore = create<SessionListState>((set, get) => ({
   },
 
   rename: async (sessionId, title) => {
+    const wasRenamed = locallyRenamedSessions.has(sessionId);
+    pendingRenames.add(sessionId);
+    locallyRenamedSessions.add(sessionId);
+    bumpLocalWrite(sessionId);
     try {
       const view = await renameSession(sessionId, title);
       set((state) => {
@@ -159,8 +188,12 @@ export const useSessionListStore = create<SessionListState>((set, get) => ({
           error: null,
         };
       });
+      pendingRenames.delete(sessionId);
     } catch (error) {
+      pendingRenames.delete(sessionId);
+      if (!wasRenamed) locallyRenamedSessions.delete(sessionId);
       set({ error: error instanceof Error ? error.message : "重命名会话失败" });
+      void get().refreshSession(sessionId).catch(() => {});
     }
   },
 }));

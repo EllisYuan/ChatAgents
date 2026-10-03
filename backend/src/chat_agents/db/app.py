@@ -25,6 +25,13 @@ class Session(Base):
     # 前端生成（建议 UUIDv7）作为路由标识，后端不生成会话标识（ADR-0013）。
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     title: Mapped[str | None] = mapped_column(Text)
+    title_generation_eligible: Mapped[bool] = mapped_column(nullable=False, server_default="false")
+    title_generation_claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    title_manually_edited: Mapped[bool] = mapped_column(nullable=False, server_default="false")
+    # 唯一一次自动标题生成的终态：``applied`` / ``fallback`` / ``manual_not_applied``；
+    # NULL 表示已认领但尚未终态（重复 POST 据此报告 ``generating``）。它是资格被消费
+    # 后的状态记录，不重新开放生成，也不承载原始错误载荷（issue #93）。
+    title_generation_outcome: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

@@ -22,8 +22,9 @@
 2. 工具调用只能从 `ToolExecutor` 发出，不能在 Runner 或工具实现外另开旁路。
 3. 系统提示词是运行配置，不进入消息表。
 4. `RunEvent` 不携带 SSE 帧或供应商协议格式。
-5. 本次调用实际使用的模型随 `IterationStarted` / `TitleGenerationStarted` 事件带出——跨度与用量载荷都读事件，不各自从配置取值。
+5. 本次调用实际使用的模型随 `IterationStarted` 事件带出——跨度与用量载荷都读事件，不各自从配置取值。
+6. Runner 不拥有标题生成、轮询、等待或收尾职责；标题是会话级独立 auxiliary 调用（ADR-0036），不进入运行事件流，也不占用运行生命周期。运行不接收也不产出任何标题参数或标题事件。
 
 ## 决策来源
 
-[ADR-0006](../../../../docs/adr/0006-tool-failures-split-into-external-and-programmatic.md) · [ADR-0008](../../../../docs/adr/0008-a-run-emits-domain-events-not-wire-frames.md) · [ADR-0010](../../../../docs/adr/0010-the-system-prompt-is-run-configuration-not-conversation-memory.md) · [ADR-0011](../../../../docs/adr/0011-model-input-configuration-is-versioned-and-persisted.md) · [ADR-0025](../../../../docs/adr/0025-replay-happens-at-the-model-port-not-the-http-transport.md)
+[ADR-0006](../../../../docs/adr/0006-tool-failures-split-into-external-and-programmatic.md) · [ADR-0008](../../../../docs/adr/0008-a-run-emits-domain-events-not-wire-frames.md) · [ADR-0010](../../../../docs/adr/0010-the-system-prompt-is-run-configuration-not-conversation-memory.md) · [ADR-0011](../../../../docs/adr/0011-model-input-configuration-is-versioned-and-persisted.md) · [ADR-0025](../../../../docs/adr/0025-replay-happens-at-the-model-port-not-the-http-transport.md) · [ADR-0037](../../../../docs/adr/0037-session-title-attempt-is-once.md) · [ADR-0036](../../../../docs/adr/0036-title-generation-is-an-independent-session-call.md)

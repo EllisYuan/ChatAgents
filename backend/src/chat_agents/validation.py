@@ -14,6 +14,16 @@ MAX_AUTH_FIELD_LENGTH = 128
 MAX_SECTION_COUNT = 100
 MAX_SECTION_INDEX = 10_000
 
+
+def fallback_title(text: str) -> str:
+    """返回首条用户消息的公开列表回落标题。"""
+
+    title = " ".join(text.strip().split())
+    if len(title) > MAX_TITLE_LENGTH:
+        return f"{title[:MAX_TITLE_LENGTH]}..."
+    return title or "新对话"
+
+
 _MODEL_IDENTIFIER_RE = re.compile(r"^[^\s\x00-\x1f\x7f]+$")
 _HEADER_NAME_RE = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
 _SECTION_RE = re.compile(r"^[1-9][0-9]{0,3}(?:\s*,\s*[1-9][0-9]{0,3})*$")

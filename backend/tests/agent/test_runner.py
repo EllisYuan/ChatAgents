@@ -117,7 +117,6 @@ def _fake_tool_spec(
 
 
 async def _collect(runner: AgentRunner, **kwargs: Any) -> list[Any]:
-    kwargs.setdefault("auxiliary_model", "aux-model")
     kwargs.setdefault("http_client", object())  # 假 handler 从不碰它，占位即可
     return [event async for event in runner.run(**kwargs)]
 

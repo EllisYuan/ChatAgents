@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator, Collection, Iterable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal, cast
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,7 +15,7 @@ from ..db.app import Message as MessageRow
 from ..db.app import Session as SessionRow
 from ..exceptions import ProtocolError
 from ..llm.message import ModelMessage, TextBlock, ToolCallBlock, ToolResultBlock
-from ..validation import MAX_TITLE_LENGTH
+from ..validation import fallback_title
 from .masking import RETENTION_WINDOW, MaskedObservation, MaskingProjection, mask_tool_observations
 from .models import (
     SessionDetail,
@@ -29,6 +29,36 @@ from .repository import ConversationRepository
 
 OBSERVATION_KEEP = RETENTION_WINDOW
 _ORPHAN_TOOL_RESULT = "Tool call ended before a result was recorded."
+
+# 标题生成唯一尝试的终态；持久化于 ``app.session.title_generation_outcome``。
+_TITLE_OUTCOME_APPLIED = "applied"
+_TITLE_OUTCOME_FALLBACK = "fallback"
+_TITLE_OUTCOME_MANUAL = "manual_not_applied"
+
+# 标题业务响应状态——HTTP 层直接返回，不新增第二套状态机。``generating`` 与
+# ``processed`` 是派生值，不落库。
+TitleStatus = Literal["applied", "fallback", "generating", "processed", "manual_not_applied"]
+
+
+@dataclass(frozen=True, slots=True)
+class TitleClaim:
+    """一次标题生成认领的结果；``claimed`` 为假时不得调用模型。"""
+
+    status: TitleStatus
+    title: str | None
+    source_text: str | None
+    claimed: bool
+
+    def __bool__(self) -> bool:
+        return self.claimed
+
+
+@dataclass(frozen=True, slots=True)
+class TitleOutcome:
+    """一次标题生成的业务终态与最终生效标题。"""
+
+    status: TitleStatus
+    title: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,19 +121,6 @@ class ModelInputProjection:
         attributes["pruned_runs"] = list(self.pruned_run_ids)
         attributes["retention_window"] = self.retention_window
         return attributes
-
-
-def _title_from_message(text: str) -> str:
-    title = " ".join(text.strip().split())
-    if len(title) > MAX_TITLE_LENGTH:
-        return f"{title[:MAX_TITLE_LENGTH]}..."
-    return title or "新对话"
-
-
-def fallback_title(text: str) -> str:
-    """返回首条用户消息的公开列表回落标题。"""
-
-    return _title_from_message(text)
 
 
 def _tool_calls(message: ModelMessage) -> list[ToolCallBlock]:
@@ -318,15 +335,123 @@ class ConversationService:
     async def rename_session(self, session_id: UUID, title: str | None) -> SessionRow | None:
         return await self.repository.rename_session(session_id, title)
 
-    async def set_generated_title(
-        self, session_id: UUID, *, expected_title: str | None, title: str
-    ) -> bool:
-        """写入首轮生成标题，但不覆盖已有标题。"""
+    async def claim_title_generation(self, session_id: UUID) -> bool:
+        """消费新会话的唯一自动生成资格。"""
 
-        if expected_title is None:
-            return await self.repository.set_title_if_missing(session_id, title)
-        return await self.repository.replace_title_if_current(
-            session_id, expected_title=expected_title, title=title
+        return await self.repository.claim_title_generation(session_id)
+
+    async def set_generated_title(self, session_id: UUID, *, title: str) -> str | None:
+        """按人工修改状态条件应用，并返回实际生效的标题。"""
+
+        return await self.repository.apply_generated_title(session_id, title)
+
+    async def short_transaction_claim_title_generation(
+        self, *, session_factory: Any, session_id: UUID
+    ) -> TitleClaim | None:
+        """在一次短事务内认领标题生成，并返回模型的唯一素材。
+
+        不借用请求级 session，也不在此后持有数据库事务或行锁——模型调用期间不得
+        占用连接。会话不存在或已软删除返回 ``None``（HTTP 404）；已认领、不具资格
+        或已人工改名返回 ``claimed=False``，调用方不得调用模型（ADR-0037）。
+        """
+
+        async with session_factory() as session, session.begin():
+            repository = ConversationRepository(session)
+            row = await repository.get_session(session_id)
+            if row is None:
+                return None
+            if row.title_generation_outcome is not None:
+                status: TitleStatus = cast(TitleStatus, row.title_generation_outcome)
+                return TitleClaim(status=status, title=row.title, source_text=None, claimed=False)
+            if row.title_generation_claimed_at is not None:
+                return TitleClaim(
+                    status="generating", title=row.title, source_text=None, claimed=False
+                )
+            if not row.title_generation_eligible or row.title is None or row.title_manually_edited:
+                return TitleClaim(
+                    status="processed", title=row.title, source_text=None, claimed=False
+                )
+            source_text = await repository.first_user_text(session_id)
+            if not source_text:
+                # 素材缺失（异常历史行）不得触发模型调用。
+                return TitleClaim(
+                    status="processed", title=row.title, source_text=None, claimed=False
+                )
+            if not await repository.claim_title_generation(session_id):
+                # 并发竞争未胜出：本连接已认领或人工改名，回读真实状态，不调用模型。
+                fresh = await repository.get_session(session_id, populate_existing=True)
+                if fresh is None:
+                    return None
+                status = (
+                    cast(TitleStatus, fresh.title_generation_outcome)
+                    if fresh.title_generation_outcome is not None
+                    else "generating"
+                )
+                return TitleClaim(status=status, title=fresh.title, source_text=None, claimed=False)
+            return TitleClaim(
+                status="generating", title=row.title, source_text=source_text, claimed=True
+            )
+
+    async def short_transaction_finalize_title_generation(
+        self, *, session_factory: Any, session_id: UUID, generated_title: str | None
+    ) -> TitleOutcome | None:
+        """在一次短事务内写下标题生成终态并返回最终生效标题。
+
+        ``generated_title`` 为可用的模型文本时尝试条件应用；为 ``None``（上游失败、
+        空输出、缺少终态、超时或取消统一折算）时保留 fallback 并记录 ``fallback``。
+        应用被人工改名或软删除阻断时区分记录，且不得重开生成资格。会话不存在返回
+        ``None``（HTTP 404）。
+        """
+
+        async with session_factory() as session, session.begin():
+            repository = ConversationRepository(session)
+            row = await repository.get_session(session_id)
+            if row is None:
+                # 已软删除或不存在：迟到结果不改业务行，只回未应用，不重开资格。
+                return TitleOutcome(status="processed", title=None)
+            if row.title_generation_outcome is not None:
+                # 重复终态：不覆盖已记录的事实，只回当前标题。
+                return TitleOutcome(
+                    status=cast(TitleStatus, row.title_generation_outcome), title=row.title
+                )
+            if generated_title is None:
+                # 上游失败 / 空输出 / 缺少终态 / 超时 / 取消：保留 fallback 终态。
+                # 标题取条件 UPDATE 提交后的实际值——人工改名可能在模型调用期间发生，
+                # 此时唯一可信的最新标题来自 RETURNING，而不是本事务先头读到的旧行。
+                recorded = await repository.record_title_terminal(
+                    session_id, outcome=_TITLE_OUTCOME_FALLBACK
+                )
+                if recorded is not None:
+                    return TitleOutcome(status="fallback", title=recorded)
+                return await self._read_repeated_title_outcome(repository, session_id)
+            applied = await repository.apply_generated_title_terminal(session_id, generated_title)
+            if applied is not None:
+                return TitleOutcome(status="applied", title=applied)
+            # 未应用：资格已被并发消费（如人工改名）——回读真实终态区分。
+            fresh = await repository.get_session(session_id, populate_existing=True)
+            if fresh is None:
+                return TitleOutcome(status="processed", title=None)
+            if fresh.title_generation_outcome is not None:
+                return TitleOutcome(
+                    status=cast(TitleStatus, fresh.title_generation_outcome), title=fresh.title
+                )
+            recorded = await repository.record_title_terminal(
+                session_id, outcome=_TITLE_OUTCOME_MANUAL
+            )
+            if recorded is None:
+                return await self._read_repeated_title_outcome(repository, session_id)
+            return TitleOutcome(status="manual_not_applied", title=recorded)
+
+    async def _read_repeated_title_outcome(
+        self, repository: ConversationRepository, session_id: UUID
+    ) -> TitleOutcome:
+        """终态已被并发写入时回读权威值，不覆盖已记录事实。"""
+
+        fresh = await repository.get_session(session_id, populate_existing=True)
+        if fresh is None or fresh.title_generation_outcome is None:
+            return TitleOutcome(status="processed", title=None if fresh is None else fresh.title)
+        return TitleOutcome(
+            status=cast(TitleStatus, fresh.title_generation_outcome), title=fresh.title
         )
 
     async def delete_session(self, session_id: UUID) -> bool:
@@ -337,30 +462,35 @@ class ConversationService:
     ) -> MessageRow:
         """Create the session and its first message in the caller's transaction."""
 
-        row, _ = await self.append_user_message_with_title_claim(
+        row, _ = await self.append_user_message_with_title_candidate(
             session_id=session_id, message_id=message_id, text=text
         )
         return row
 
-    async def append_user_message_with_title_claim(
+    async def append_user_message_with_title_candidate(
         self, *, session_id: UUID, message_id: UUID, text: str
     ) -> tuple[MessageRow, bool]:
-        """追加用户消息，并在同一事务内原子认领首轮标题生成。"""
+        """追加用户消息并建立 fallback；调用前再单独认领生成资格。"""
 
         if not text.strip():
             raise ProtocolError("User message must not be empty")
         session = await self.repository.get_session_for_update(session_id)
         if session is None:
-            session = await self.repository.upsert_session(session_id)
-        title_claimed = session.title is None
-        if title_claimed:
-            await self.repository.rename_session(session_id, _title_from_message(text))
+            session = await self.repository.upsert_session(session_id, title_eligible=True)
+        title_candidate = (
+            session.title_generation_eligible
+            and session.title_generation_claimed_at is None
+            and session.title is None
+            and not session.title_manually_edited
+        )
+        if title_candidate:
+            await self.repository.set_fallback_title(session_id, fallback_title(text))
         row = await self.append_model_message(
             session_id=session_id,
             message_id=message_id,
             message=ModelMessage(role="user", content=(TextBlock(text=text),)),
         )
-        return row, title_claimed
+        return row, bool(title_candidate)
 
     async def append_model_message(
         self, *, session_id: UUID, message_id: UUID, message: ModelMessage

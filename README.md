@@ -617,7 +617,7 @@ ChatAgents/
 │   └── tests/                    # unit · contract · replay · integration · eval
 ├── frontend/                     # React 19 · Vite · TanStack Query · Zustand
 ├── .claude/rules/                # 按路径渐进加载的 Agent 约束
-├── docs/adr/                     # 34 份架构决策记录
+├── docs/adr/                     # 37 份架构决策记录
 ├── scripts/dev.py               # 跨平台 setup · test · lint · check
 ├── scripts/check-docs-drift.py  # README 派生内容防腐
 ├── Makefile                      # Unix 环境的薄封装
@@ -666,6 +666,8 @@ ChatAgents/
 | `GET /api/sessions` | 会话列表（复合游标分页） |
 | `GET /api/sessions/{session_id}/messages` | 会话消息 |
 | `GET /api/sessions/{session_id}/runs` | 该会话的运行列表，供客户端与消息序列合并 |
+| `POST /api/sessions/{session_id}/title` | 一次性独立生成标题；离开会话时取消尚未完成的模型调用 |
+| `GET /api/sessions/{session_id}/title-generation` | 只读标题生成观测，不触发模型调用；当前会话列表不提供展示入口 |
 | `GET /api/runs/{run_id}` | 运行详情：跨度树 · 用量汇总 · 运行配置 |
 | `GET /api/models` · `POST /api/models/refresh` | 模型清单与刷新 |
 | `GET /api/evals/summary` | 站点评测展示面的四个数字 |
@@ -741,7 +743,7 @@ docker compose logs postgresql --tail 100 -f
 | [`CLAUDE.md`](./CLAUDE.md) | Agent 入口地图、标准命令与全局不变量 |
 | [`CONTEXT.md`](./CONTEXT.md) | 术语表——只定义术语**是什么**，不记录实现方式 |
 | [`PROGRESS.md`](./PROGRESS.md) | 跨会话执行状态、后续事项与阻塞 |
-| [`docs/adr/`](./docs/adr/) | 34 份架构决策记录，含被否决方案与理由 |
+| [`docs/adr/`](./docs/adr/) | 37 份架构决策记录，含被否决方案与理由 |
 | `backend/src/chat_agents/*/ARCHITECTURE.md` | 与能力模块共置的职责、边界和不变量 |
 | [`docs/research/`](./docs/research/) | 选型阶段的调研报告 |
 | [`frontend/src/features/trace/SPEC.md`](./frontend/src/features/trace/SPEC.md) | 跨度树的客户端合并规则 |

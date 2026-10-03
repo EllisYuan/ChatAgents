@@ -161,7 +161,6 @@ def test_replay_port_drives_runner_with_identical_fixed_run_id() -> None:
                 messages,
                 profile=_profile(),
                 main_model="model-a",
-                auxiliary_model="aux-model",
                 effort="medium",
                 http_client=object(),
                 run_id=run_id,

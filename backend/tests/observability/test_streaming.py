@@ -1,4 +1,8 @@
-"""``observe``：独立事务、增量落跨度、断连收尾（issue #52）。"""
+"""``observe``：独立事务、增量落跨度、断连收尾（issue #52）。
+
+标题生成已改为会话级独立调用（issue #93）：``observe`` 只维护主运行及其跨度，
+主运行一到终态就收尾，本模块不再持有标题生命周期。
+"""
 
 from __future__ import annotations
 
@@ -329,6 +333,100 @@ def test_observe_marks_aborted_and_partial_on_client_disconnect() -> None:
             async with factory() as session:
                 run = (await session.execute(select(Run).where(Run.id == run_id))).scalar_one()
                 assert run.status == "aborted"
+
+                span = (
+                    await session.execute(select(Span).where(Span.id == llm_span_id(run_id, 1)))
+                ).scalar_one()
+                assert span.status == "error"
+                assert span.usage_status == "partial"
+                assert span.ended_at is not None
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.db
+def test_observe_finishes_run_immediately_on_completion_without_draining_stream() -> None:
+    """主运行到达终态即收尾，不等待事件流排空（issue #93）。
+
+    上游事件流在 ``RunCompleted`` 之后仍挂着（未关闭），运行也必须在该事件被
+    消费的那一刻就已 ``finish_run``——主运行生命周期不再由后续事件决定。断言
+    在流仍挂起时直接查库，因此证明的是「终态即收尾」而非「生成器最终关掉才收尾」。
+    """
+
+    async def scenario() -> None:
+        async with migrated_engine("chat_agents_observe_early_finish") as engine:
+            factory = session_factory_for(engine)
+            session_id, trigger_id = await _seed_session_and_trigger(factory)
+            run_id = str(uuid4())
+            message = ModelMessage(role="assistant", content=(TextBlock(text="ok"),))
+
+            async def source() -> AsyncIterator[RunEvent]:
+                yield IterationStarted(run_id=run_id, iteration=1, model="test-model")
+                yield IterationCompleted(
+                    run_id=run_id,
+                    iteration=1,
+                    message=message,
+                    usage=_USAGE,
+                    stop_reason="stop",
+                )
+                yield RunCompleted(run_id=run_id, iteration=1, message=message)
+                # 终态之后流仍未排空——收尾不得依赖这一步。
+                await asyncio.Event().wait()
+
+            wrapped = observe(
+                source(),
+                session_id=session_id,
+                trigger_message_id=trigger_id,
+                effort="medium",
+                session_factory=factory,
+            )
+            await anext(wrapped)
+            await anext(wrapped)
+            await anext(wrapped)  # RunCompleted：此刻运行必须已经收尾
+
+            async with factory() as session:
+                run = (await session.execute(select(Run).where(Run.id == run_id))).scalar_one()
+                assert run.status == "completed"
+                assert run.ended_at is not None
+
+            await wrapped.aclose()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.db
+def test_observe_finishes_run_as_failed_on_run_failed_event() -> None:
+    """真实的 ``RunFailed`` 事件把运行收成 failed，未闭合跨度标 partial。"""
+
+    async def scenario() -> None:
+        async with migrated_engine("chat_agents_observe_run_failed") as engine:
+            factory = session_factory_for(engine)
+            session_id, trigger_id = await _seed_session_and_trigger(factory)
+            run_id = str(uuid4())
+
+            source = _events(
+                [
+                    IterationStarted(run_id=run_id, iteration=1, model="test-model"),
+                    RunFailed(run_id=run_id, iteration=1, reason="upstream error"),
+                ]
+            )
+
+            forwarded = [
+                event
+                async for event in observe(
+                    source,
+                    session_id=session_id,
+                    trigger_message_id=trigger_id,
+                    effort="medium",
+                    session_factory=factory,
+                )
+            ]
+            assert len(forwarded) == 2
+
+            async with factory() as session:
+                run = (await session.execute(select(Run).where(Run.id == run_id))).scalar_one()
+                assert run.status == "failed"
+                assert run.ended_at is not None
 
                 span = (
                     await session.execute(select(Span).where(Span.id == llm_span_id(run_id, 1)))

@@ -4,6 +4,10 @@
 （ADR-0002 允许的方向本来就是 ``obs -> app``）。断连（生成器被 ``aclose()``/
 取消）时，``finally`` 里把未闭合的跨度标记 ``partial``、运行标记 ``aborted``，
 不伪造一次「跑完了」。所有写入独立事务，失败只记日志，不影响业务事务与线上流。
+
+标题生成不再属于主运行的生命周期（issue #93）：``observe`` 只维护主运行及其
+模型/工具跨度，主运行一到终态（``RunCompleted`` / ``RunFailed``）就立刻收尾，
+不等待任何 auxiliary 调用。
 """
 
 from __future__ import annotations
@@ -19,15 +23,12 @@ from ..agent.events import (
     RunCompleted,
     RunEvent,
     RunFailed,
-    TitleGenerated,
-    TitleGenerationStarted,
     ToolFinished,
     ToolStarted,
     llm_span_id,
-    title_span_id,
     tool_span_id,
 )
-from ..llm.resolve import AuxiliaryModelSource, KeySource
+from ..llm.resolve import KeySource
 from .reasoning import reasoning_attributes
 from .writer import RunWriter
 
@@ -66,18 +67,20 @@ async def observe(
     role: Literal["main"] = "main",
     protocol: str | None = None,
     key_source: KeySource | None = None,
-    auxiliary_model_source: AuxiliaryModelSource | None = None,
     retention_window: int | None = None,
     run_attributes: dict[str, Any] | None = None,
     session_factory: Any,
-    expect_title: bool = False,
 ) -> AsyncIterator[RunEvent]:
-    """透传事件，并记录主模型跨度、auxiliary 标题兄弟跨度、以及挂在当前迭代
-    模型跨度下的工具跨度（issue #69）。
+    """透传事件，并记录主模型跨度、以及挂在当前迭代模型跨度下的工具跨度
+    （issue #69）。
 
-    跨度的模型列一律取自事件（``IterationStarted.model`` / ``TitleGenerationStarted
-    .model``），不从入参取——跨度记的必须是**实际发出去的那个**模型，而不是解析时
-    以为的那个（issue #82）。``close_span`` 不写模型列，此后没有纠正点。
+    跨度的模型列一律取自事件（``IterationStarted.model``），不从入参取——跨度
+    记的必须是**实际发出去的那个**模型，而不是解析时以为的那个（issue #82）。
+    ``close_span`` 不写模型列，此后没有纠正点。
+
+    主运行一到终态（``RunCompleted`` / ``RunFailed``）就立即 ``finish_run``
+    （issue #93）：标题已改为会话级独立调用，不再共享生命周期，主运行因此不
+    会为等待标题而保持 ``running``。
     """
 
     writer = RunWriter(session_factory=session_factory)
@@ -88,34 +91,17 @@ async def observe(
     # `IterationCompleted` 里跟着清空，得单独记一份「当前迭代模型跨度 id」，
     # 只在下一次 `IterationStarted` 到来时才换成新值（issue #69）。
     current_iteration_span_id: UUID | None = None
-    title_span_open: UUID | None = None
     tool_spans_open: dict[str, UUID] = {}
     # 开启时写下的工具属性（入参）——`close_span` 是整列替换而非 JSONB 合并，
     # 而 `ToolFinished` 不带入参，闭合时必须从这里取回，否则入参被结果覆盖掉。
     tool_attributes_open: dict[str, dict[str, Any]] = {}
-    main_terminal = False
-    main_status: Literal["completed", "failed"] = "completed"
-    title_terminal = not expect_title
     terminal = False
     main_attributes: dict[str, Any] = {"protocol": protocol} if protocol is not None else {}
-    title_attributes: dict[str, Any] = {"protocol": protocol} if protocol is not None else {}
     if key_source is not None:
         # ADR-0029：密钥来源是观测事实，值得记，只是没有 UI 读它——成本归属需要
         # 时从跨度里按它分组查得出来。记的是来源，不是密钥本身。
         main_attributes["key_source"] = key_source
-        title_attributes["key_source"] = key_source
-    if auxiliary_model_source is not None:
-        # ADR-0014：auxiliary 回落必须留痕。用户填了一个不存在的标识时回落是静默
-        # 发生的，不记下来他会以为用的就是自己填的那个。
-        title_attributes["auxiliary_model_source"] = auxiliary_model_source
     main_reasoning: list[str] = []
-    title_reasoning: list[str] = []
-
-    async def finish_if_ready() -> None:
-        nonlocal terminal
-        if run_id is not None and main_terminal and title_terminal and not terminal:
-            await writer.finish_run(run_id=run_id, status=main_status)
-            terminal = True
 
     try:
         async for event in events:
@@ -138,22 +124,7 @@ async def observe(
                     attributes=run_attributes,
                 )
 
-            if isinstance(event, TitleGenerationStarted):
-                title_terminal = False
-                title_reasoning.clear()
-                title_span_open = title_span_id(run_id)
-                await writer.open_span(
-                    span_id=title_span_open,
-                    run_id=run_id,
-                    parent_span_id=None,
-                    name="title_generation",
-                    kind="llm",
-                    role="auxiliary",
-                    model=event.model,
-                    attributes=title_attributes,
-                )
-
-            elif isinstance(event, IterationStarted):
+            if isinstance(event, IterationStarted):
                 main_reasoning.clear()
                 main_span_open = llm_span_id(run_id, event.iteration)
                 current_iteration_span_id = main_span_open
@@ -229,35 +200,12 @@ async def observe(
                         attributes=attributes,
                     )
 
-            elif isinstance(event, TitleGenerated):
-                title_terminal = True
-                if title_span_open is not None:
-                    usage = event.usage
-                    attributes = dict(title_attributes)
-                    summary = reasoning_attributes("".join(title_reasoning))
-                    if summary is not None:
-                        attributes.update(summary)
-                    await writer.close_span(
-                        span_id=title_span_open,
-                        run_id=run_id,
-                        status="error" if event.error is not None else "ok",
-                        usage_status=usage.state if usage is not None else "unavailable",
-                        input_tokens=usage.input_tokens if usage is not None else None,
-                        output_tokens=usage.output_tokens if usage is not None else None,
-                        reasoning_tokens=usage.reasoning_tokens if usage is not None else None,
-                        attributes=attributes,
-                    )
-                    title_span_open = None
-                await finish_if_ready()
-
             elif isinstance(event, RunCompleted):
-                main_terminal = True
-                main_status = "completed"
-                await finish_if_ready()
+                # 主运行到达正常终态即收尾——不再等待标题（issue #93）。
+                await writer.finish_run(run_id=run_id, status="completed")
+                terminal = True
 
             elif isinstance(event, RunFailed):
-                main_terminal = True
-                main_status = "failed"
                 if main_span_open is not None:
                     await _close_partial_span(writer, span_id=main_span_open, run_id=run_id)
                     main_span_open = None
@@ -265,9 +213,9 @@ async def observe(
                     await _close_partial_span(writer, span_id=open_span_id, run_id=run_id)
                 tool_spans_open.clear()
                 tool_attributes_open.clear()
-                if title_terminal:
-                    await writer.finish_run(run_id=run_id, status="failed")
-                    terminal = True
+                # 主运行到达失败终态即收尾——不再等待标题（issue #93）。
+                await writer.finish_run(run_id=run_id, status="failed")
+                terminal = True
 
             yield event
     except Exception:
@@ -275,8 +223,6 @@ async def observe(
         if run_id is not None and not terminal:
             if main_span_open is not None:
                 await _close_partial_span(writer, span_id=main_span_open, run_id=run_id)
-            if title_span_open is not None:
-                await _close_partial_span(writer, span_id=title_span_open, run_id=run_id)
             for open_span_id in tool_spans_open.values():
                 await _close_partial_span(writer, span_id=open_span_id, run_id=run_id)
             tool_spans_open.clear()
@@ -288,8 +234,6 @@ async def observe(
         if run_id is not None and not terminal:
             if main_span_open is not None:
                 await _close_partial_span(writer, span_id=main_span_open, run_id=run_id)
-            if title_span_open is not None:
-                await _close_partial_span(writer, span_id=title_span_open, run_id=run_id)
             for open_span_id in tool_spans_open.values():
                 await _close_partial_span(writer, span_id=open_span_id, run_id=run_id)
             tool_spans_open.clear()

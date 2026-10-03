@@ -42,6 +42,10 @@ Open WebUI 用 `TASK_MODEL` / `TASK_MODEL_EXTERNAL` 指代这类模型，是聊�
 
 生成失败时回落到截断首条用户消息前 30 字，并如实记一条错误跨度。业界两家在这里都是"log 一下，就没有标题"——那在每用户私有的列表里无所谓，在一个全局公开的列表里就是一条没有标识的记录。按 [ADR-0006](./0006-tool-failures-split-into-external-and-programmatic.md) 的二分，这是外部失败，不中止运行。
 
+> 归属修订（[ADR-0035](./0035-session-owned-title-spans.md)，issue #92）：上述「标题跨度必须挂在主运行」是历史实现的事实，不再是独立标题调用的数据模型约束。旧跨度与历史统计保持原样。
+>
+> 生命周期修订（[ADR-0036](./0036-title-generation-is-an-independent-session-call.md)，issue #93）：上述标题与主运行同生命周期、标题跨度挂主运行以及「运行」放宽的决定已被替代。新标题通过独立会话 HTTP 调用生成，主运行只处理 ReAct；辅助输出仍永不写入消息表。
+
 ## 只有一个槽位，不按用途分裂
 
 LibreChat 走的是另一条路：不设通用角色，按用途分字段（`titleModel`、`titleEndpoint`）。本项目不采纳——配置面每多一个用途就多一个键，而前端高级选项已经要同时承载"用户密钥还是服务端预设"这一维，再叠一维会把界面变吵。
@@ -54,3 +58,5 @@ LibreChat 走的是另一条路：不设通用角色，按用途分字段（`tit
 - [ADR-0008](./0008-a-run-emits-domain-events-not-wire-frames.md) 末尾那条断言改为断言 `auxiliary` 解析出的模型标识非空且零配置下等于 `main`——它现在守的不再是一条空路径，而是标题生成的必经之路。
 - 配置键 `auxiliaryModel`，YAML 端点文件与前端高级选项同名。**它只是一个模型标识，不是一份独立的端点档案**——两个角色共用同一个协议、base URL 与鉴权（见 [ADR-0014](./0014-the-model-is-chosen-by-the-user-never-by-the-system.md)）。
 - 零配置下 `auxiliary` 跟随主模型，意味着一个 30 字的标题可能由 reasoning 模型生成，账单不小。**这个成本不隐藏**——它在 trace 里按角色单独列账。隐形辅助调用吃掉的钱是 LLM 应用里真实存在的黑洞，本项目的立场是把它照出来，而不是藏起来或替用户做主关掉它。
+
+> **展示范围调整（[ADR-0036](./0036-title-generation-is-an-independent-session-call.md)，2026-10-03）**：标题用量继续按 `auxiliary` 记录在会话级跨度中，但不在会话列表提供详情入口。旧运行跨度仍在原运行详情里展示；新标题观测的其他页面入口后续另行设计。

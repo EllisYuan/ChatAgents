@@ -150,6 +150,34 @@ export async function renameSession(sessionId: string, title: string | null): Pr
   return (await response.json()) as SessionView;
 }
 
+export type TitleGenerationRequest = components["schemas"]["TitleGenerationRequest"];
+export type TitleGenerationResponse = components["schemas"]["TitleGenerationResponse"];
+
+/**
+ * 会话级独立标题生成（issue #93）——`POST /api/sessions/{session_id}/title`。
+ *
+ * 与主运行互不相关：主运行停止、失败或收尾都不取消它；离开会话或页面时由调用方
+ * 通过 `signal` 中止。请求只带发送时的配置快照（`model_override`），素材一律由
+ * 服务端从保存的首条用户消息读取，客户端不重传标题素材。响应是普通 JSON，
+ * `title` 表示实际生效的标题（可能是 fallback 或人工改名结果）。
+ */
+export async function generateSessionTitle(
+  sessionId: string,
+  request: TitleGenerationRequest,
+  signal?: AbortSignal,
+): Promise<TitleGenerationResponse> {
+  const response = await fetch(`/api/sessions/${sessionId}/title`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+    signal,
+  });
+  if (!response.ok) {
+    throw new Error(await problemMessage(response));
+  }
+  return (await response.json()) as TitleGenerationResponse;
+}
+
 export type RunSummary = components["schemas"]["RunSummary"];
 export type RunDetail = components["schemas"]["RunDetail"];
 

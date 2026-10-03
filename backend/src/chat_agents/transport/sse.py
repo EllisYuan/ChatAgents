@@ -48,19 +48,15 @@ from ..agent.events import (
     RunEvent,
     RunFailed,
     TextDelta,
-    TitleGenerated,
-    TitleGenerationStarted,
     ToolFinished,
     ToolStarted,
     assistant_message_id,
     llm_span_id,
     reasoning_message_id,
-    title_span_id,
     tool_message_id,
 )
 from ..error_codes import RUN_FAILED_CODE, error_code
-from ..llm.events import Usage
-from .custom_events import SpanPayload, TitlePayload, ToolResultPayload, UsagePayload
+from .custom_events import SpanPayload, ToolResultPayload, UsagePayload
 
 logger = structlog.get_logger(__name__)
 
@@ -101,9 +97,11 @@ async def encode_sse(
 ) -> AsyncIterator[str]:
     """把一次运行的领域事件流编码成 AG-UI over SSE 的线上字符串流。
 
-    ``usage`` 载荷里的模型标识取自事件本身（``IterationStarted.model`` /
-    ``TitleGenerationStarted.model``），与跨度、与真实调用同源（issue #82）——
-    用量归属要可信，三者就不能各有各的来源。
+    ``usage`` 载荷里的模型标识取自事件本身（``IterationStarted.model``），与跨度、
+    与真实调用同源（issue #82）——用量归属要可信，三者就不能各有各的来源。
+
+    标题生成不在主运行流内（issue #93）：本函数不再识别标题事件，也不再发
+    ``chatagents.title`` 或标题对应的 auxiliary 用量、跨度。
     """
 
     thread_id = str(session_id)
@@ -115,69 +113,11 @@ async def encode_sse(
     current_reasoning_id: UUID | None = None
     iteration_started_at = time.monotonic()
     tool_started_at: dict[str, float] = {}
-    title_started_at: float | None = None
-    title_model: str | None = None
     main_model: str | None = None
 
     try:
         async for event in events:
             match event:
-                case TitleGenerationStarted(model=model_name):
-                    title_model = model_name
-                    title_started_at = time.monotonic()
-
-                case TitleGenerated(session_id=title_session_id, title=title, usage=usage):
-                    # 标题调用必然先发过 TitleGenerationStarted（runner 里两者同处
-                    # 一个分支），模型标识因此一定已经到手——拿不到是程序错误，不是
-                    # 该用空串糊过去的缺失态。
-                    assert title_model is not None
-                    title_usage = usage or Usage(
-                        state="unavailable",
-                        input_tokens=None,
-                        output_tokens=None,
-                        reasoning_tokens=None,
-                    )
-                    duration_ms = (
-                        int((time.monotonic() - title_started_at) * 1000)
-                        if title_started_at is not None
-                        else 0
-                    )
-                    yield _emit(
-                        CustomEvent(
-                            type=EventType.CUSTOM,
-                            name="chatagents.title",
-                            value=TitlePayload(
-                                session_id=str(title_session_id), title=title
-                            ).model_dump(),
-                        )
-                    )
-                    yield _emit(
-                        CustomEvent(
-                            type=EventType.CUSTOM,
-                            name="chatagents.usage",
-                            value=UsagePayload(
-                                role="auxiliary",
-                                model=title_model,
-                                usage_status=title_usage.state,
-                                input_tokens=title_usage.input_tokens,
-                                output_tokens=title_usage.output_tokens,
-                                reasoning_tokens=title_usage.reasoning_tokens,
-                            ).model_dump(),
-                        )
-                    )
-                    yield _emit(
-                        CustomEvent(
-                            type=EventType.CUSTOM,
-                            name="chatagents.span",
-                            value=SpanPayload(
-                                span_id=str(title_span_id(run_id)),
-                                parent_span_id=None,
-                                kind="llm",
-                                duration_ms=duration_ms,
-                            ).model_dump(),
-                        )
-                    )
-
                 case IterationStarted(iteration=iteration, model=iteration_model):
                     main_model = iteration_model
                     current_assistant_id = assistant_message_id(run_id, iteration)
