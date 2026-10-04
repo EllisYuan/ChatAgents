@@ -3,6 +3,7 @@ import { NavLink, useNavigate } from "react-router-dom";
 
 import type { SessionSummary } from "../../api/client";
 import { useSessionListStore } from "../../stores/session-list-store";
+import { DeleteIcon, EditIcon } from "../session/icons";
 
 function formatAbsoluteTime(iso: string): string {
   return new Intl.DateTimeFormat("zh-CN", {
@@ -28,6 +29,7 @@ interface SessionListItemProps {
  */
 export function SessionListItem({ session, active }: SessionListItemProps) {
   const [renaming, setRenaming] = useState(false);
+  const [hoverDismissed, setHoverDismissed] = useState(false);
   const [draft, setDraft] = useState(session.title ?? "");
   const rename = useSessionListStore((state) => state.rename);
   const remove = useSessionListStore((state) => state.remove);
@@ -56,7 +58,11 @@ export function SessionListItem({ session, active }: SessionListItemProps) {
   };
 
   return (
-    <li className={`session-item${active ? " session-item--active" : ""}`}>
+    <li
+      className={`session-item${active ? " session-item--active" : ""}`}
+      data-hover-dismissed={hoverDismissed || undefined}
+      onPointerLeave={() => setHoverDismissed(false)}
+    >
       {renaming ? (
         <input
           className="session-item-rename"
@@ -76,11 +82,11 @@ export function SessionListItem({ session, active }: SessionListItemProps) {
           }}
         />
       ) : (
-        <NavLink className="session-item-link" to={`/s/${session.id}`}>
+        <NavLink className="session-item-link" to={`/s/${session.id}`} onClick={() => setHoverDismissed(true)}>
           {session.title === null ? (
             <span className="session-item-title session-item-title--skeleton">新会话</span>
           ) : (
-            <span key={session.title} className="session-item-title session-item-title--enter">
+            <span key={session.title} className="session-item-title session-item-title--enter" title={session.title}>
               {session.title}
             </span>
           )}
@@ -91,11 +97,11 @@ export function SessionListItem({ session, active }: SessionListItemProps) {
         </NavLink>
       )}
       <span className="session-item-actions">
-        <button type="button" className="session-item-action" onClick={startRename} aria-label="重命名会话">
-          改名
+        <button type="button" className="session-item-action" onClick={startRename} title="改名" aria-label="重命名会话">
+          <EditIcon size={14} />
         </button>
-        <button type="button" className="session-item-action" onClick={handleDelete} aria-label="删除会话">
-          删除
+        <button type="button" className="session-item-action session-item-action--delete" onClick={handleDelete} title="删除" aria-label="删除会话">
+          <DeleteIcon size={14} />
         </button>
       </span>
     </li>

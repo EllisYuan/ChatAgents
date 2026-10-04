@@ -18,7 +18,7 @@ import { historyToMessages } from "./history";
 
 type RunPhase = "idle" | "streaming";
 type RunIdBySeq = Record<number, string>;
-type ConfigChoice = "system" | "custom";
+type ConfigChoice = "system" | "custom" | "current";
 
 interface PendingConfigConfirmation {
   text: string;
@@ -246,6 +246,8 @@ export function useAgentRun(sessionId: string) {
     if (choice === "system") {
       useModelOptionsStore.getState().setSystemDefault();
       await executeSend(pending.text, pending.effort, true);
+    } else if (choice === "current") {
+      await executeSend(pending.text, pending.effort);
     } else {
       useModelOptionsStore.getState().setProfileChoice(CUSTOM_PROFILE);
     }

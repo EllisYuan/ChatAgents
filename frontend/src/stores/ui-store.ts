@@ -1,11 +1,17 @@
 import { create } from "zustand";
 
 type UiState = {
-  inspectorOpen: boolean;
-  toggleInspector: () => void;
+  settingsOpen: boolean;
+  openSettings: () => void;
+  closeSettings: () => void;
+  modelSettingsDisabled: boolean;
+  setModelSettingsDisabled: (disabled: boolean) => void;
 };
 
 export const useUiStore = create<UiState>((set) => ({
-  inspectorOpen: true,
-  toggleInspector: () => set((state) => ({ inspectorOpen: !state.inspectorOpen })),
+  settingsOpen: false,
+  openSettings: () => set({ settingsOpen: true }),
+  closeSettings: () => set({ settingsOpen: false }),
+  modelSettingsDisabled: false,
+  setModelSettingsDisabled: (modelSettingsDisabled) => set({ modelSettingsDisabled }),
 }));

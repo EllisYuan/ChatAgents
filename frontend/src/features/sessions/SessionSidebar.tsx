@@ -1,6 +1,8 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
+import { useUiStore } from "../../stores/ui-store";
+import { SettingsIcon } from "../session/icons";
 import { useSessionListStore } from "../../stores/session-list-store";
 import { uuidv7 } from "../../utils/uuid";
 import { SessionListItem } from "./SessionListItem";
@@ -23,6 +25,7 @@ export function SessionSidebar({ activeSessionId }: SessionSidebarProps) {
   const loadInitial = useSessionListStore((state) => state.loadInitial);
   const loadMore = useSessionListStore((state) => state.loadMore);
   const navigate = useNavigate();
+  const openSettings = useUiStore((state) => state.openSettings);
 
   useEffect(() => {
     void loadInitial();
@@ -40,7 +43,7 @@ export function SessionSidebar({ activeSessionId }: SessionSidebarProps) {
   return (
     <nav className="session-sidebar" aria-label="会话列表">
       <div className="session-sidebar-head">
-        <p className="eyebrow">SESSIONS</p>
+        <p className="session-sidebar-label">session</p>
         <button
           type="button"
           className="session-sidebar-new"
@@ -50,6 +53,7 @@ export function SessionSidebar({ activeSessionId }: SessionSidebarProps) {
           + 新会话
         </button>
       </div>
+      <div className="session-sidebar-scroll" role="region" aria-label="历史会话" tabIndex={0}>
       {error && (
         <p className="session-sidebar-error" role="alert">
           {error}
@@ -75,6 +79,22 @@ export function SessionSidebar({ activeSessionId }: SessionSidebarProps) {
           {loadingMore ? "加载中…" : "加载更多"}
         </button>
       )}
+      </div>
+      <div className="session-sidebar-account">
+        <span className="account-avatar" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="8" r="4" />
+            <path d="M4 21v-2a8 8 0 0 1 16 0v2" />
+          </svg>
+        </span>
+        <span className="account-copy">
+          <strong>localhost</strong>
+          <span>本地用户</span>
+        </span>
+        <button className="icon-button account-settings" type="button" onClick={openSettings} title="设置" aria-label="打开设置" aria-haspopup="dialog">
+          <SettingsIcon size={18} />
+        </button>
+      </div>
     </nav>
   );
 }
