@@ -2,7 +2,6 @@ import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { getModelProfiles, getModels, refreshModels } from "../../api/client";
-import type { components } from "../../generated/api";
 import { CUSTOM_PROFILE, useModelOptionsStore } from "../../stores/model-options-store";
 import { InfoTooltip } from "./InfoTooltip";
 import {
@@ -12,11 +11,9 @@ import {
   validateEndpointUrl,
 } from "./model-endpoint";
 import { ModelPicker } from "./ModelPicker";
+import { ProtocolPicker } from "./ProtocolPicker";
 import { SecretInput } from "./SecretInput";
-
-type Protocol = components["schemas"]["ModelRefreshRequest"]["protocol"];
-
-const PROTOCOLS: Protocol[] = ["openai_responses", "openai_chat_completions", "anthropic_messages"];
+import { SettingsSelect } from "./SettingsSelect";
 
 /**
  * 鉴权字段的常见取值——中转站几乎只用这两个头名，第三个选项把自由输入
@@ -157,19 +154,17 @@ export function AdvancedOptions({ disabled = false }: AdvancedOptionsProps) {
     <div className="advanced-options">
       <div className="advanced-slot">
         <span className="advanced-slot-label">端点档案</span>
-        <select
-          className="advanced-input advanced-select"
+        <SettingsSelect
+          id="profile-picker"
+          label="端点档案"
           value={profileChoice ?? ""}
-          onChange={(event) => setProfileChoice(event.target.value)}
+          options={[
+            ...availableProfiles.map((profile) => ({ value: profile.name, label: profile.name })),
+            { value: CUSTOM_PROFILE, label: "自定义端点" },
+          ]}
+          onChange={setProfileChoice}
           disabled={disabled}
-        >
-          {availableProfiles.map((profile) => (
-            <option key={profile.name} value={profile.name}>
-              {profile.name}
-            </option>
-          ))}
-          <option value={CUSTOM_PROFILE}>自定义端点</option>
-        </select>
+        />
       </div>
 
       <div className="advanced-slot">
@@ -199,19 +194,11 @@ export function AdvancedOptions({ disabled = false }: AdvancedOptionsProps) {
         </span>
         {isCustom ? (
           <div className="custom-endpoint-fields">
-            <select
-              className="advanced-input advanced-select"
+            <ProtocolPicker
               value={custom.protocol}
-              onChange={(event) => setCustomField("protocol", event.target.value as Protocol)}
+              onChange={(protocol) => setCustomField("protocol", protocol)}
               disabled={disabled}
-              aria-label="上游协议"
-            >
-              {PROTOCOLS.map((protocol) => (
-                <option key={protocol} value={protocol}>
-                  {protocol}
-                </option>
-              ))}
-            </select>
+            />
             <input
               className="advanced-input"
               type="text"

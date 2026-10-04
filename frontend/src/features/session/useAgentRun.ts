@@ -18,7 +18,7 @@ import { historyToMessages } from "./history";
 
 type RunPhase = "idle" | "streaming";
 type RunIdBySeq = Record<number, string>;
-type ConfigChoice = "system" | "custom";
+type ConfigChoice = "system" | "custom" | "current";
 
 interface PendingConfigConfirmation {
   text: string;
@@ -39,9 +39,11 @@ export function useAgentRun(sessionId: string) {
   const [pendingConfigConfirmation, setPendingConfigConfirmation] = useState<PendingConfigConfirmation | null>(null);
   const [configChoiceResolved, setConfigChoiceResolved] = useState(false);
   const [persistenceWarning, setPersistenceWarning] = useState<string | null>(null);
+  const [interruptedIds, setInterruptedIds] = useState<Record<string, true>>({});
   const hasSessionConfigRef = useRef(false);
   const { trees: traces, startTrace, handleTraceEvent } = useTraceStream();
   const abortRef = useRef<AbortController | null>(null);
+  const stoppedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -124,6 +126,7 @@ export function useAgentRun(sessionId: string) {
 
       const controller = new AbortController();
       abortRef.current = controller;
+      stoppedRef.current = false;
       let steps = 0;
       let tokens = 0;
       let usageIncomplete = false;
@@ -157,11 +160,14 @@ export function useAgentRun(sessionId: string) {
           controller.signal,
         );
       } catch (error) {
-        if (controller.signal.aborted) return;
-        failed = true;
-        setErrors((prev) => ({ ...prev, [assistantId]: error instanceof Error ? error.message : "连接中断，请重试" }));
+        if (controller.signal.aborted) {
+          if (!stoppedRef.current) return;
+        } else {
+          failed = true;
+          setErrors((prev) => ({ ...prev, [assistantId]: error instanceof Error ? error.message : "连接中断，请重试" }));
+        }
       }
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted && !stoppedRef.current) return;
       setActiveTool(null);
       setPhase("idle");
       setStreamingId(null);
@@ -191,6 +197,47 @@ export function useAgentRun(sessionId: string) {
     return accepted;
   }, [configChoiceResolved, effort, executeSend, phase, sessionExists]);
 
+  const stopStreaming = useCallback(() => {
+    if (phase !== "streaming" || !streamingId) return;
+    stoppedRef.current = true;
+    setInterruptedIds((prev) => ({ ...prev, [streamingId]: true }));
+    abortRef.current?.abort();
+  }, [phase, streamingId]);
+
+  const retryTurn = useCallback((messageId: string) => {
+    if (phase === "streaming") return;
+    const idx = messages.findIndex((message) => message.id === messageId);
+    if (idx === -1) return;
+    const target = messages[idx];
+    const userMessage = target.role === "user" ? target : messages[idx - 1];
+    const assistantMessage = target.role === "assistant" ? target : messages[idx + 1];
+    if (!userMessage || userMessage.role !== "user") return;
+    const text = userMessage.text;
+    setMessages((prev) => prev.filter((message) => message.id !== userMessage.id && message.id !== assistantMessage?.id));
+    if (assistantMessage) {
+      setErrors((prev) => omit(prev, assistantMessage.id));
+      setSummaries((prev) => omit(prev, assistantMessage.id));
+      setInterruptedIds((prev) => omit(prev, assistantMessage.id));
+    }
+    void executeSend(text, effort);
+  }, [effort, executeSend, messages, phase]);
+
+  const editMessage = useCallback((userId: string, newText: string) => {
+    if (phase === "streaming") return;
+    const trimmed = newText.trim();
+    if (!trimmed) return;
+    const idx = messages.findIndex((message) => message.id === userId);
+    if (idx === -1 || messages[idx].role !== "user") return;
+    const assistantMessage = messages[idx + 1]?.role === "assistant" ? messages[idx + 1] : undefined;
+    setMessages((prev) => prev.filter((message) => message.id !== userId && message.id !== assistantMessage?.id));
+    if (assistantMessage) {
+      setErrors((prev) => omit(prev, assistantMessage.id));
+      setSummaries((prev) => omit(prev, assistantMessage.id));
+      setInterruptedIds((prev) => omit(prev, assistantMessage.id));
+    }
+    void executeSend(trimmed, effort);
+  }, [effort, executeSend, messages, phase]);
+
   const confirmConfigChoice = useCallback(async (choice: ConfigChoice) => {
     const pending = pendingConfigConfirmation;
     if (!pending) return;
@@ -199,6 +246,8 @@ export function useAgentRun(sessionId: string) {
     if (choice === "system") {
       useModelOptionsStore.getState().setSystemDefault();
       await executeSend(pending.text, pending.effort, true);
+    } else if (choice === "current") {
+      await executeSend(pending.text, pending.effort);
     } else {
       useModelOptionsStore.getState().setProfileChoice(CUSTOM_PROFILE);
     }
@@ -207,7 +256,7 @@ export function useAgentRun(sessionId: string) {
   return {
     messages, historyLoaded, sessionExists, phase, streamingId, summaries, errors, activeTool,
     traces, runIdBySeq, effort, setEffort, sendMessage, pendingConfigConfirmation,
-    confirmConfigChoice, persistenceWarning,
+    confirmConfigChoice, persistenceWarning, retryTurn, editMessage, stopStreaming, interruptedIds,
   };
 }
 

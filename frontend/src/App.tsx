@@ -1,8 +1,10 @@
 import { useMemo } from "react";
 import { NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
 
+import { ResizableColumns } from "./components/ResizableColumns";
 import { EvalsPage } from "./features/evals/EvalsPage";
 import { SessionPage } from "./features/session/SessionPage";
+import { SettingsDialog } from "./features/settings/SettingsDialog";
 import { SessionSidebar } from "./features/sessions/SessionSidebar";
 import { uuidv7 } from "./utils/uuid";
 
@@ -18,32 +20,29 @@ function Shell() {
     <div className="app-shell">
       <header className="topbar">
         <NavLink className="brand" to="/" aria-label="返回 ChatAgents 首页">
-          <span className="brand-mark" aria-hidden="true">
-            ◒
-          </span>
-          <span>CHATAGENTS</span>
+          <span>ChatAgents</span>
         </NavLink>
-        <div className="topbar-status">
-          <span className="status-dot" aria-hidden="true" />
-          <span>LOCAL / READY</span>
-        </div>
       </header>
-      <div className="app-body">
-        <SessionSidebar activeSessionId={activeSessionId} />
-        <main className="route-stage">
+      <ResizableColumns
+        className="app-body"
+        storageKey="chatagents.sessions-width"
+        label="调整 Sessions 宽度"
+        fixedSide="start"
+        defaultWidth={256}
+        minWidth={200}
+        maxWidth={480}
+        contentMinWidth={480}
+        start={<SessionSidebar activeSessionId={activeSessionId} />}
+        end={<main className={`route-stage${activeSessionId ? " route-stage--session" : ""}`} tabIndex={0} aria-label="页面内容">
           <Routes>
             <Route path="/" element={<LandingPage />} />
             <Route path="/s/:sessionId" element={<SessionPage />} />
             <Route path="/evals" element={<EvalsPage />} />
             <Route path="*" element={<Navigate replace to="/" />} />
           </Routes>
-        </main>
-      </div>
-      <footer className="site-footer">
-        <NavLink className="text-button" to="/evals">
-          评测数据
-        </NavLink>
-      </footer>
+        </main>}
+      />
+      <SettingsDialog />
     </div>
   );
 }
@@ -55,23 +54,11 @@ function LandingPage() {
 
   return (
     <section className="landing-page" aria-labelledby="landing-title">
-      <p className="eyebrow">OBSERVABILITY / CHAT SURFACE</p>
-      <h1 id="landing-title">
-        Think in
-        <span>signals.</span>
-      </h1>
-      <p className="landing-copy">
-        一个面向 agent run 的工作台。输入 session link，进入对话、工具调用与 trace 的同一条时间线。
-      </p>
+      <h1 id="landing-title">有什么可以帮你？</h1>
+      <p className="landing-copy">开始新会话，或从左侧继续之前的会话。</p>
       <NavLink className="primary-action" to={`/s/${draftSessionId}`}>
         <span>开始新会话</span>
-        <span aria-hidden="true">↗</span>
       </NavLink>
-      <div className="landing-index" aria-hidden="true">
-        <span>01</span>
-        <span className="index-line" />
-        <span>CHAT / TRACE / RUN</span>
-      </div>
     </section>
   );
 }

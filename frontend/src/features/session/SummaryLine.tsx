@@ -26,7 +26,7 @@ export function SummaryLine({ pending, summary }: SummaryLineProps) {
   if (pending) {
     return (
       <p className="run-summary run-summary--pending" aria-live="polite">
-        <span className="run-summary-marker">▸</span> 运行中…
+        <span className="run-summary-marker run-summary-marker--pending">▸</span> 运行中
       </p>
     );
   }
