@@ -1,0 +1,15 @@
+[build-system]
+requires = ["uv_build>=0.7.19,<0.10"]
+build-backend = "uv_build"
+
+[project]
+name = "chatagents-launch"
+version = "0.0.0"
+requires-python = ">=3.11,<3.13"
+dependencies = []
+
+[project.scripts]
+dev-backend = "chatagents_launch:dev_backend"
+dev-frontend = "chatagents_launch:dev_frontend"
+test = "chatagents_launch:test"
+prod-deploy = "chatagents_launch:prod_deploy"

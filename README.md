@@ -273,95 +273,118 @@ ModelPort.stream ──┼─ openai_chat_completions  ─┼──→ 统一的
 
 ---
 
-## 快速开始
+## 快速运行
 
-### 环境要求
+所有命令除特别注明外，均在仓库根目录执行。先准备 Docker 与 Docker Compose、Node 22；使用 `uv` 快捷命令还需要 Python 3.11–3.12 和 [uv](https://docs.astral.sh/uv/)。与模型交互需配置至少一个端点档案对应的 API 密钥；`web_search` 还需 `TAVILY_API_KEY`，详见[环境变量](#环境变量)。
 
-- **Python** 3.11–3.12，装 [uv](https://docs.astral.sh/uv/)
-- **Node** 22（前端）
-- **Docker** 与 docker compose 插件（跑本地 PostgreSQL）
-- **API 密钥**：[Anthropic](https://console.anthropic.com/) 或 [OpenAI](https://platform.openai.com/)（至少一个）、[Tavily](https://tavily.com/)；Jina Reader 可选（不填也能用，只是配额低）
+### 本地一条命令启动数据库与后端
 
-### 1. 装依赖
-
-```bash
-git clone https://github.com/EllisYuan/ChatAgents.git
-cd ChatAgents
-uv sync --project backend
-npm --prefix frontend ci
-```
-
-### 2. 起数据库
-
-**首次跑测试之前必须先起本地 PostgreSQL**——集成测试打真库，没有内存库替身：
-
-```bash
-docker compose up -d postgresql
-```
-
-> ⚠️ compose service 的名字是 **`postgresql`**，不是 `postgres`。
-
-本地默认值（都可以用同名环境变量覆盖）：
-
-| 项 | 默认值 |
-|---|---|
-| Compose service | `postgresql` |
-| 容器名 | `chatagent-postgresql` |
-| 数据库 | `chat_agents` |
-| 用户 | `root` |
-| 密码 | `Agent@Dev_1` |
-| 监听 | `127.0.0.1:5432` |
-| 数据卷 | `chatagent_postgres-data` |
-
-密码写进连接 URL 时，`@` 必须编码成 `%40`：
-
-```text
-postgresql+psycopg://root:Agent%40Dev_1@127.0.0.1:5432/chat_agents
-```
-
-compose 起 backend 时会先跑 `migrate` service；单独初始化数据库：
-
-```bash
-docker compose run --rm migrate
-```
-
-### 3. 配环境变量
-
-```bash
-cp .env.sample .env
-```
-
-### 4. 起服务
-
-```bash
-# 终端 1：后端
-uv run --project backend python scripts/dev.py serve
-
-# 终端 2：前端
-uv run --project backend python scripts/dev.py web
-```
-
-两条命令分别等价于下面这两句；`--port 8000` 建议显式写出——它现在恰好等于
-uvicorn 的默认端口，但显式写明能防止端口再次漂移：
-
-```bash
-uv run --project backend python -m uvicorn chat_agents.main:app --app-dir backend/src --reload --port 8000
-npm --prefix frontend run dev
-```
-
-| 入口 | 地址 |
-|---|---|
-| 前端 | http://localhost:5173 |
-| 后端（本地直起） | http://localhost:8000 |
-| 后端（容器映射） | http://127.0.0.1:19180 |
-| OpenAPI 文档 | `<后端地址>/docs` |
-
-用 compose 起数据库和后端（前端仍在宿主上跑 dev server）：
+首次使用时复制 `.env.sample` 为 `.env`（Windows PowerShell：`Copy-Item .env.sample .env`；Linux/macOS：`cp .env.sample .env`），填写需要的密钥；已有 `.env` 不要覆盖。然后执行：
 
 ```bash
 docker compose up -d --build
-VITE_BACKEND_ORIGIN=http://127.0.0.1:19180 npm --prefix frontend run dev
 ```
+
+这条命令启动 `postgresql`，等待健康检查，再由 `migrate` 执行 Alembic `upgrade head`；迁移成功后才启动容器中的 `backend`。它**不启动前端**。前端仍在宿主机运行，另开终端（Windows PowerShell）：
+
+```powershell
+npm --prefix frontend ci
+$env:VITE_BACKEND_ORIGIN = "http://127.0.0.1:19180"
+npm --prefix frontend run dev
+```
+
+Linux/macOS 可用 `VITE_BACKEND_ORIGIN=http://127.0.0.1:19180 npm --prefix frontend run dev`。容器后端为 `http://127.0.0.1:19180`，Vite 前端通常为 `http://localhost:5173`。`docker compose ps` 可查看服务状态；普通重启不要使用 `docker compose down -v`，那会删除数据库 volume。需要调试代码和后端自动重载时，走下面的[开发模式](#开发)。
+
+### 已配置服务器上的发布快捷入口
+
+仅在完成[一次性服务器准备](#一次性服务器准备人做cd-做不了)的 Linux 服务器、并确认工作区干净和 tag 正确后执行：
+
+```bash
+uv run prod-deploy v1.4.2
+```
+
+这会调用 `scripts/deploy.sh <tag>`，切换到该 tag、拉取镜像和前端产物并启动生产服务；不会替你创建服务器配置，Windows 下也不能执行。发布后还必须做[健康检查、前端路由和 SSE 实测](#部署后必做curl--n-实测)。完整发布与回滚语义见[部署](#部署)。
+
+## 开发
+
+### 首次准备与本地启动
+
+先安装后端锁定依赖和前端依赖：
+
+```bash
+uv run --project backend python scripts/dev.py setup
+```
+
+此命令运行 `uv sync --project backend --locked` 和前端的 `npm ci`。首次使用再复制 `.env.sample` 为 `.env` 并填密钥（已存在则保留）。接着启动**本地开发数据库并升级 schema**：
+
+```bash
+uv run --project backend python scripts/dev.py db
+```
+
+这会执行 `docker compose up -d postgresql`，随后从仓库根目录加载 `backend/alembic.ini` 执行 `alembic upgrade head`。Compose service 名是 `postgresql`，不是 `postgres`。打开两个终端，分别运行：
+
+```bash
+# 终端 1：宿主机后端，自动重载，监听 8000
+uv run dev-backend
+```
+
+```bash
+# 终端 2：宿主机 Vite，默认代理 /api 和 /health 到 8000
+uv run dev-frontend
+```
+
+`dev-backend` → `backend/dev.py` → `scripts/dev.py serve`；`dev-frontend` → `frontend/dev.py` → `scripts/dev.py web`。根目录的 `pyproject.toml` 注册快捷命令，`--project backend` 选择后端锁定依赖环境，**不会改变工作目录**。这两个 `dev-*` 命令只启动服务，**不会执行数据库迁移**；升级请运行上面的 `db` 命令。用 `Ctrl+C` 停止服务。
+
+| 入口 | 地址 |
+|---|---|
+| 前端 Vite | http://localhost:5173 |
+| 宿主机后端 | http://localhost:8000 |
+| Compose 后端 | http://127.0.0.1:19180 |
+| OpenAPI 文档 | `<后端地址>/docs` |
+
+### 数据库更新与版本检查
+
+代码新增 `backend/alembic/versions/` 下的 migration 后，启动宿主机后端前再次运行 `scripts/dev.py db`；不需要删除数据库，也不要仅修改 ORM 后就期待旧库自动增加字段。确认 **`DATABASE_URL` 指向要升级的库**：进程环境变量优先于根目录 `.env`；后端和 Alembic 都会读取它，未设置时使用本地默认连接。有重要数据时先备份。若 `upgrade` 报错，先看首次错误，不要用 `alembic stamp` 跳过 migration。
+
+```bash
+# 查看数据库当前 revision
+uv run --project backend python -m alembic -c backend/alembic.ini current
+
+# 查看代码里的最新 revision
+uv run --project backend python -m alembic -c backend/alembic.ini heads
+
+# 已有 PostgreSQL 服务时，仅执行数据库升级（不启动容器）
+uv run --project backend python -m alembic -c backend/alembic.ini upgrade head
+```
+
+`current` 是当前数据库实际 revision，`heads` 是代码提供的终点；两者不一致说明数据库尚未跟上代码。`-c backend/alembic.ini` 是从仓库根目录调用 Alembic 时的配置路径。Compose 容器路径会自动经过 `migrate`；若只需要单独运行容器的迁移，可执行 `docker compose run --rm migrate`，它使用 Compose 配置的数据库，而非宿主机的 `DATABASE_URL`。
+
+本地 Compose 默认数据库是 `chat_agents`，监听 `127.0.0.1:5432`，使用 named volume `chatagent_postgres-data`。连接 URL 中的特殊字符要 URL 编码；若在 `.env` 里修改 `POSTGRES_PASSWORD`，还要同步配置 `POSTGRES_PASSWORD_URLENCODED`。已有 volume 的数据库账户密码不会因修改 `.env` 自动重设。
+
+### 开发检查与隔离测试
+
+```bash
+# 一次性独立 PostgreSQL + 完整确定性检查 + 清理该测试环境
+uv run test
+```
+
+该命令使用独立的 Compose 项目和 volume，默认测试端口 `127.0.0.1:55432`；运行 `scripts/dev.py check` 后清理它自己创建的测试容器和 volume，不使用日常开发库 `5432`。Windows 需要 Git for Windows 提供 Bash。可用 `CHATAGENTS_TEST_DB_PORT` 改测试端口。它不是持续运行的 staging 服务；付费且有方差的 Agent Evals 不属于阻断检查。
+
+若已自行准备好 PostgreSQL，也可直接运行完整检查，或按需运行单项任务：
+
+```bash
+uv run --project backend python scripts/dev.py check      # test → contract → lint → typecheck → ui-test → build → docs → guards
+uv run --project backend python scripts/dev.py test       # 后端默认测试
+uv run --project backend python scripts/dev.py contract   # REST 契约测试
+uv run --project backend python scripts/dev.py lint       # Ruff、mypy、Import Linter、前端 lint
+uv run --project backend python scripts/dev.py typecheck  # 前端类型检查
+uv run --project backend python scripts/dev.py ui-test    # 前端标题交互测试
+uv run --project backend python scripts/dev.py build      # 前端构建
+uv run --project backend python scripts/dev.py docs       # 文档漂移与 README/CI 命令检查
+uv run --project backend python scripts/dev.py guards     # 检查器反向测试
+```
+
+`check` 和 `uv run test` 会运行 `guards`；部分 guard 会暂时改写并还原仓库文件，前端类型生成与构建也可能写入文件。工作区有未提交修改时先留意状态，不要把它们当只读命令。更细的 CI 命令、门禁与非阻断评测见[测试与门禁](#测试与门禁)。
 
 ## 配置
 
@@ -701,9 +724,17 @@ proxy_pass http://127.0.0.1:19180/;  # ❌ 末尾斜杠 → 路径被截断
 proxy_pass http://127.0.0.1:19180;   # ✓ 保留完整路径
 ```
 
+### 会话接口报 `UndefinedColumn` / 数据库缺字段
+
+先在[开发模式的数据库更新](#数据库更新与版本检查)中对比 `alembic current` 和 `heads`，核对 `DATABASE_URL` 后执行 `uv run --project backend python scripts/dev.py db`。`uv run dev-backend` 不会自动迁移；`/health` 返回正常也不能证明 schema 与代码一致。
+
 ### 集成测试连不上数据库
 
-先确认 `docker compose up -d postgresql` 起来了，且连接串里的 `@` 编码成了 `%40`。
+直接运行 `scripts/dev.py test` 时，先确认 `docker compose up -d postgresql` 已启动，且连接串中的特殊字符已 URL 编码。若要使用独立的测试数据库，改用 `uv run test`。
+
+### 前端请求不到本地后端
+
+宿主机运行 `uv run dev-backend` 时，Vite 默认代理到 `127.0.0.1:8000`；运行 `docker compose up -d --build` 时，容器后端映射到 `127.0.0.1:19180`，前端启动前应设置 `VITE_BACKEND_ORIGIN`（参见[快速运行](#快速运行)）。浏览器显示的 500 不一定是后端真实错误，先看 Vite 代理和后端日志。
 
 ### 会话列表拿不到第二页
 
@@ -760,7 +791,7 @@ docker compose logs postgresql --tail 100 -f
 ## 贡献
 
 1. Fork 并建分支
-2. **先起数据库**：`docker compose up -d postgresql`
+2. **先起数据库并升级 schema**：`uv run --project backend python scripts/dev.py db`
 3. 跑一遍上面的自检块
 4. 提 PR
 

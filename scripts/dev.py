@@ -45,7 +45,7 @@ def setup() -> None:
 
 def db() -> None:
     run(["docker", "compose", "up", "-d", "postgresql"])
-    uv("python", "-m", "alembic", "upgrade", "head")
+    uv("python", "-m", "alembic", "-c", "backend/alembic.ini", "upgrade", "head")
 
 
 def serve() -> None:
@@ -84,7 +84,10 @@ def lint() -> None:
         "check",
         "--config=backend/pyproject.toml",
         "backend",
+        "src",
+        "frontend/dev.py",
         "scripts/dev.py",
+        "scripts/test_env.py",
         "scripts/check-docs-drift.py",
     )
     uv(
@@ -93,7 +96,10 @@ def lint() -> None:
         "--check",
         "--config=backend/pyproject.toml",
         "backend",
+        "src",
+        "frontend/dev.py",
         "scripts/dev.py",
+        "scripts/test_env.py",
         "scripts/check-docs-drift.py",
     )
     uv("mypy", "--config-file=backend/pyproject.toml", "backend")
