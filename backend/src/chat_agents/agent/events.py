@@ -55,12 +55,6 @@ def llm_span_id(run_id: str, iteration: int) -> UUID:
     return uuid5(_run_namespace(run_id), f"{iteration}:span")
 
 
-def title_span_id(run_id: str) -> UUID:
-    """为一次运行的标题模型调用派生稳定的兄弟跨度标识。"""
-
-    return uuid5(_run_namespace(run_id), "title:span")
-
-
 def tool_span_id(run_id: str, tool_call_id: str) -> UUID:
     """为一次工具调用派生稳定的跨度标识（issue #69：工具跨度持久化）。"""
 
@@ -73,7 +67,7 @@ class IterationStarted:
 
     ``model`` 带在事件上而不是让下游各自从配置里取（issue #82）：跨度的模型列、
     ``usage`` 载荷的模型、真实发给上游的模型，三者必须是同一个值，而「记得三处
-    都改」不是一种结构保证。事件是唯一来源，与 ``TitleGenerationStarted`` 一致。
+    都改」不是一种结构保证。事件是唯一来源。
     """
 
     run_id: str
@@ -81,25 +75,6 @@ class IterationStarted:
     model: str
     prompt_version_id: str | None = None
     tool_schema_version_id: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class TitleGenerationStarted:
-    """标题 auxiliary 调用开始，供观测层打开兄弟跨度。"""
-
-    run_id: str
-    model: str
-
-
-@dataclass(frozen=True, slots=True)
-class TitleGenerated:
-    """标题调用完成；失败时携带回落标题与错误原因。"""
-
-    run_id: str
-    session_id: UUID
-    title: str
-    usage: Usage | None = None
-    error: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,8 +157,6 @@ class RunFailed:
 
 RunEvent = (
     IterationStarted
-    | TitleGenerationStarted
-    | TitleGenerated
     | TextDelta
     | ReasoningDelta
     | IterationCompleted

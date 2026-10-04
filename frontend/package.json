@@ -10,6 +10,7 @@
     "typecheck": "npm run generate:types && tsc --noEmit",
     "check:model-options": "node scripts/check-model-options-regression.mjs",
     "check:layout": "npm run build && node scripts/check-layout-regression.mjs",
+    "test:title-generation": "node --import ./node_modules/tsx/dist/loader.mjs --test scripts/check-title-generation-interactions.mjs scripts/check-title-proxy-disconnect.mjs",
     "generate:types": "node scripts/generate-api-types.mjs"
   },
   "dependencies": {
@@ -31,8 +32,10 @@
     "@types/react-dom": "19.2.2",
     "@vitejs/plugin-react": "5.0.2",
     "eslint": "9.34.0",
+    "jsdom": "26.1.0",
     "openapi-typescript": "7.13.0",
     "tailwindcss": "4.1.13",
+    "tsx": "4.20.6",
     "typescript": "5.9.2",
     "typescript-eslint": "8.41.0",
     "vite": "7.1.3"

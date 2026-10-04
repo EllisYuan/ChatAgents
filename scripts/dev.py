@@ -45,7 +45,7 @@ def setup() -> None:
 
 def db() -> None:
     run(["docker", "compose", "up", "-d", "postgresql"])
-    uv("python", "-m", "alembic", "upgrade", "head")
+    uv("python", "-m", "alembic", "-c", "backend/alembic.ini", "upgrade", "head")
 
 
 def serve() -> None:
@@ -84,7 +84,10 @@ def lint() -> None:
         "check",
         "--config=backend/pyproject.toml",
         "backend",
+        "src",
+        "frontend/dev.py",
         "scripts/dev.py",
+        "scripts/test_env.py",
         "scripts/check-docs-drift.py",
     )
     uv(
@@ -93,7 +96,10 @@ def lint() -> None:
         "--check",
         "--config=backend/pyproject.toml",
         "backend",
+        "src",
+        "frontend/dev.py",
         "scripts/dev.py",
+        "scripts/test_env.py",
         "scripts/check-docs-drift.py",
     )
     uv("mypy", "--config-file=backend/pyproject.toml", "backend")
@@ -103,6 +109,10 @@ def lint() -> None:
 
 def typecheck() -> None:
     run(["npm", "run", "typecheck"], cwd=FRONTEND)
+
+
+def ui_test() -> None:
+    run(["npm", "run", "test:title-generation"], cwd=FRONTEND)
 
 
 def build() -> None:
@@ -123,7 +133,7 @@ def guards() -> None:
 
 
 def check() -> None:
-    for task in (test, contract, lint, typecheck, build, docs, guards):
+    for task in (test, contract, lint, typecheck, ui_test, build, docs, guards):
         task()
 
 
@@ -136,6 +146,7 @@ TASKS = {
     "contract": contract,
     "lint": lint,
     "typecheck": typecheck,
+    "ui-test": ui_test,
     "build": build,
     "docs": docs,
     "guards": guards,

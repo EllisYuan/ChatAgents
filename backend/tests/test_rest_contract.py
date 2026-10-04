@@ -242,14 +242,26 @@ def test_openapi_contains_rest_and_custom_payload_schemas() -> None:
     assert "/api/models" in paths
     assert "400" in paths["/api/runs"]["post"]["responses"]
     assert "/api/models/refresh" in paths
+    assert "/api/sessions/{session_id}/title" in paths
+    assert "200" in paths["/api/sessions/{session_id}/title"]["post"]["responses"]
+    assert "/api/sessions/{session_id}/title-generation" in paths
+    assert "200" in paths["/api/sessions/{session_id}/title-generation"]["get"]["responses"]
     assert "/health" in paths
     assert "/" not in paths
     schemas = schema["components"]["schemas"]
+    title_response = schemas["TitleGenerationResponse"]["properties"]
+    assert {"session_id", "title", "status"} <= title_response.keys()
+    assert set(title_response["status"]["enum"]) == {
+        "applied",
+        "fallback",
+        "generating",
+        "processed",
+        "manual_not_applied",
+    }
     assert {
         "ChatAgentsUsagePayload",
         "ChatAgentsSpanPayload",
         "ChatAgentsToolResultPayload",
-        "ChatAgentsTitlePayload",
         "ProblemDetails",
     } <= schemas.keys()
 
@@ -347,6 +359,26 @@ def test_rename_input_validation_returns_problem_details(payload: dict[str, obje
         assert response.status_code == 400
         assert response.headers["content-type"].startswith("application/problem+json")
         assert response.json()["type"] == "protocol_error"
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"message": "不能注入素材"},
+        {"effort": "xhigh"},
+        {"force": True},
+        {"model_override": {"api_key": "secret"}},
+    ],
+)
+def test_title_post_rejects_unsupported_input(payload: dict[str, object]) -> None:
+    async def scenario() -> None:
+        async with _client() as client:
+            response = await client.post(f"/api/sessions/{uuid4()}/title", json=payload)
+        assert response.status_code == 400
+        assert response.json()["type"] == "protocol_error"
+        assert "secret" not in response.text
 
     asyncio.run(scenario())
 

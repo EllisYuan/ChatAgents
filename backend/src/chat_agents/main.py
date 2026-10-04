@@ -14,11 +14,12 @@ encode_sse(              # 传输层：领域事件 → AG-UI 线格式
 
 from __future__ import annotations
 
+import asyncio
 import os
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Callable
+from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Annotated, Any, Literal
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4, uuid5
 
 import httpx
 import structlog
@@ -30,6 +31,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sse_starlette.sse import EventSourceResponse
 
 from .agent.runner import AgentRunner
+from .agent.versioning import TITLE_PROMPT_TEMPLATE
 from .api_models import (
     HealthResponse,
     ModelItemView,
@@ -41,31 +43,42 @@ from .api_models import (
     ModelsResponse,
     ProblemDetails,
 )
+from .conversation.models import TitleGenerationRequest, TitleGenerationResponse
 from .conversation.router import router as conversation_router
-from .conversation.service import ConversationService, fallback_title
+from .conversation.service import ConversationService
 from .conversation.streaming import persist
 from .database import get_session_factory
 from .db.model_catalog import SqlAlchemyModelCatalogStore
 from .error_codes import error_code, http_status
 from .eval_summary.router import router as eval_summary_router
-from .exceptions import AuthenticationFailed, ChatAgentsError, ProtocolError
+from .exceptions import AuthenticationFailed, ChatAgentsError, ProtocolError, SessionNotFound
 from .llm.effort import EffortTier
 from .llm.errors import ProfileUnavailableError
+from .llm.events import ModelCallCompleted, Usage
+from .llm.message import ModelMessage, TextBlock
 from .llm.model_discovery import ModelDiscoveryService, model_discovery_lifespan
 from .llm.override import ModelOverride
+from .llm.port import ModelPort, model_port_scope
 from .llm.profile import EndpointProfile
-from .llm.resolve import resolve_profiles
+from .llm.resolve import ResolvedProfiles, resolve_profiles
 from .llm.server_config import build_available_profiles, load_server_endpoints
 from .llm.settings import Settings
 from .logging_config import configure_logging
 from .observability.router import router as observability_router
 from .observability.streaming import observe
-from .transport.custom_events import SpanPayload, TitlePayload, ToolResultPayload, UsagePayload
+from .observability.writer import RunWriter
+from .transport.custom_events import SpanPayload, ToolResultPayload, UsagePayload
 from .transport.sse import encode_sse
-from .validation import MAX_MESSAGE_LENGTH, MAX_PROFILE_NAME_LENGTH, validate_non_blank
+from .validation import (
+    MAX_MESSAGE_LENGTH,
+    MAX_PROFILE_NAME_LENGTH,
+    MAX_TITLE_LENGTH,
+    validate_non_blank,
+)
 
 configure_logging()
 logger = structlog.get_logger(__name__)
+_TITLE_TIMEOUT_SECONDS = 30
 
 
 @asynccontextmanager
@@ -103,7 +116,6 @@ def _custom_openapi() -> dict[str, Any]:
         ("ChatAgentsUsagePayload", UsagePayload),
         ("ChatAgentsSpanPayload", SpanPayload),
         ("ChatAgentsToolResultPayload", ToolResultPayload),
-        ("ChatAgentsTitlePayload", TitlePayload),
         ("ProblemDetails", ProblemDetails),
     ):
         schemas[name] = model.model_json_schema(ref_template="#/components/schemas/{model}")
@@ -364,6 +376,12 @@ def get_agent_runner() -> AgentRunner:
     return AgentRunner()
 
 
+def get_title_model_port_factory() -> Callable[[EndpointProfile], ModelPort] | None:
+    """测试可替换标题调用的模型边界，线上由 ``model_port_scope`` 管理资源。"""
+
+    return None
+
+
 @app.post("/api/runs")
 async def create_run(
     request: RunRequest, runner: Annotated[AgentRunner, Depends(get_agent_runner)]
@@ -381,11 +399,9 @@ async def create_run(
     user_message_id = uuid4()
     async with session_factory() as session, session.begin():
         service = ConversationService(session)
-        _, title_claimed = await service.append_user_message_with_title_claim(
+        await service.append_user_message_with_title_candidate(
             session_id=request.session_id, message_id=user_message_id, text=request.message
         )
-    expected_title = fallback_title(request.message) if title_claimed else None
-
     async with session_factory() as session:
         projection = await ConversationService(session).rebuild_model_input_with_metadata(
             request.session_id
@@ -407,12 +423,9 @@ async def create_run(
                 messages,
                 profile=resolved.profile,
                 main_model=resolved.main_model,
-                auxiliary_model=resolved.auxiliary_model,
                 effort=request.effort,
                 http_client=http_client,
                 run_id=run_id,
-                session_id=request.session_id,
-                generate_title=title_claimed,
                 shared_model_client=not custom_endpoint,
             )
             scope_service = object.__new__(ConversationService)
@@ -423,7 +436,6 @@ async def create_run(
                     raw_events,
                     session_id=request.session_id,
                     session_factory=session_factory,
-                    expected_title=expected_title,
                     round_trip_message_ids=round_trip_message_ids,
                 )
                 observed = observe(
@@ -433,10 +445,8 @@ async def create_run(
                     effort=request.effort,
                     protocol=resolved.profile.protocol,
                     key_source=resolved.key_source,
-                    auxiliary_model_source=resolved.auxiliary_model_source,
                     retention_window=projection.retention_window,
                     run_attributes=projection.attributes,
-                    expect_title=title_claimed,
                     session_factory=session_factory,
                 )
                 async for frame in encode_sse(
@@ -447,3 +457,201 @@ async def create_run(
             await http_client.aclose()
 
     return EventSourceResponse(stream())
+
+
+async def _title_model_call(
+    port: ModelPort, *, text: str, model: str, profile: EndpointProfile
+) -> tuple[str | None, Usage | None, str | None]:
+    completed: ModelCallCompleted | None = None
+    try:
+        async with asyncio.timeout(_TITLE_TIMEOUT_SECONDS):
+            async for event in port.stream(
+                messages=[ModelMessage(role="user", content=(TextBlock(text=text),))],
+                tools=[],
+                model=model,
+                effort="low",
+                profile=profile,
+                system_prompt=TITLE_PROMPT_TEMPLATE,
+            ):
+                if isinstance(event, ModelCallCompleted):
+                    completed = event
+    except TimeoutError:
+        return None, completed.usage if completed is not None else None, "timeout"
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        return None, completed.usage if completed is not None else None, "upstream"
+    if completed is None:
+        return None, None, "missing_terminal"
+    generated = " ".join(
+        "".join(block.text for block in completed.message.content if isinstance(block, TextBlock))
+        .strip()
+        .split()
+    )
+    if not generated:
+        return None, completed.usage, "empty_output"
+    return generated[:MAX_TITLE_LENGTH], completed.usage, None
+
+
+async def _title_call_until_disconnect(
+    request: Request, port: ModelPort, *, text: str, model: str, profile: EndpointProfile
+) -> tuple[str | None, Usage | None, str | None]:
+    async def watch_disconnect() -> None:
+        while True:
+            if (await request.receive())["type"] == "http.disconnect":
+                return
+
+    model_task = asyncio.create_task(
+        _title_model_call(port, text=text, model=model, profile=profile)
+    )
+    disconnect_task = asyncio.create_task(watch_disconnect())
+    try:
+        done, _ = await asyncio.wait(
+            {model_task, disconnect_task}, return_when=asyncio.FIRST_COMPLETED
+        )
+        if model_task in done:
+            return await model_task
+        model_task.cancel()
+        await asyncio.gather(model_task, return_exceptions=True)
+        raise asyncio.CancelledError
+    finally:
+        disconnect_task.cancel()
+        model_task.cancel()
+        await asyncio.gather(disconnect_task, model_task, return_exceptions=True)
+
+
+@app.post(
+    "/api/sessions/{session_id}/title",
+    response_model=TitleGenerationResponse,
+    tags=["sessions"],
+)
+async def generate_session_title(
+    session_id: UUID,
+    payload: TitleGenerationRequest,
+    request: Request,
+    port_factory: Annotated[
+        Callable[[EndpointProfile], ModelPort] | None,
+        Depends(get_title_model_port_factory),
+    ],
+) -> TitleGenerationResponse:
+    session_factory = get_session_factory()
+    service = object.__new__(ConversationService)
+    claim = await service.short_transaction_claim_title_generation(
+        session_factory=session_factory, session_id=session_id
+    )
+    if claim is None:
+        raise SessionNotFound(f"Session {session_id} was not found")
+    if not claim.claimed:
+        return TitleGenerationResponse(
+            session_id=session_id, title=claim.title, status=claim.status
+        )
+
+    span_id = uuid5(session_id, "title_generation")
+    writer = RunWriter(session_factory=session_factory)
+    usage: Usage | None = None
+    failure_reason: str | None = None
+    generated_title: str | None = None
+    resolved: ResolvedProfiles | None = None
+    span_open = False
+    try:
+        try:
+            server_config = load_server_endpoints(Settings().endpoints_config_path)
+            resolved = resolve_profiles(server_config, payload.model_override)
+        except ProfileUnavailableError:
+            failure_reason = "upstream"
+        if resolved is not None and claim.source_text:
+            try:
+                await writer.open_span(
+                    span_id=span_id,
+                    run_id=None,
+                    session_id=session_id,
+                    parent_span_id=None,
+                    name="title_generation",
+                    kind="llm",
+                    role="auxiliary",
+                    model=resolved.auxiliary_model,
+                    attributes={
+                        "effort": "low",
+                        "protocol": resolved.profile.protocol,
+                        "key_source": resolved.key_source,
+                        "auxiliary_model_source": resolved.auxiliary_model_source,
+                    },
+                )
+                span_open = True
+            except Exception as exc:
+                logger.warning("title.observation_failed", error_type=type(exc).__name__)
+            async with AsyncExitStack() as stack:
+                port = (
+                    port_factory(resolved.profile)
+                    if port_factory is not None
+                    else await stack.enter_async_context(
+                        model_port_scope(
+                            resolved.profile,
+                            shared_client=not (
+                                payload.model_override is not None
+                                and payload.model_override.is_custom_endpoint
+                            ),
+                        )
+                    )
+                )
+                generated_title, usage, failure_reason = await _title_call_until_disconnect(
+                    request,
+                    port,
+                    text=claim.source_text,
+                    model=resolved.auxiliary_model,
+                    profile=resolved.profile,
+                )
+    except asyncio.CancelledError:
+        failure_reason = "cancelled"
+    except Exception:
+        failure_reason = "upstream"
+
+    outcome = None
+    finalization = asyncio.create_task(
+        service.short_transaction_finalize_title_generation(
+            session_factory=session_factory,
+            session_id=session_id,
+            generated_title=generated_title,
+        )
+    )
+    try:
+        while not finalization.done():
+            try:
+                await asyncio.shield(finalization)
+            except asyncio.CancelledError:
+                continue
+        outcome = await finalization
+    finally:
+        if span_open:
+            attributes = {
+                "effort": "low",
+                "protocol": resolved.profile.protocol if resolved else None,
+                "key_source": resolved.key_source if resolved else None,
+                "auxiliary_model_source": resolved.auxiliary_model_source if resolved else None,
+            }
+            if failure_reason is not None:
+                attributes["failure_reason"] = failure_reason
+            if outcome is not None and generated_title is not None:
+                attributes["application_result"] = (
+                    "deleted_not_applied"
+                    if outcome.status == "processed" and outcome.title is None
+                    else outcome.status
+                )
+            try:
+                await writer.close_span(
+                    span_id=span_id,
+                    run_id=None,
+                    status="error" if failure_reason is not None else "ok",
+                    usage_status=usage.state if usage is not None else "unavailable",
+                    input_tokens=usage.input_tokens if usage is not None else None,
+                    output_tokens=usage.output_tokens if usage is not None else None,
+                    reasoning_tokens=usage.reasoning_tokens if usage is not None else None,
+                    attributes=attributes,
+                )
+            except Exception as exc:
+                logger.warning("title.observation_failed", error_type=type(exc).__name__)
+    if outcome is None:
+        raise SessionNotFound(f"Session {session_id} was not found")
+    return TitleGenerationResponse(
+        session_id=session_id, title=outcome.title, status=outcome.status
+    )

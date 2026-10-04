@@ -25,10 +25,13 @@ RUN_STARTED(runId)
   CUSTOM chatagents.usage(role="main", model, usage_status,
                            input_tokens, output_tokens, reasoning_tokens)
   CUSTOM chatagents.span(span_id, parent_span_id=null, kind="llm", duration_ms)
-[任意时机可能插入，不在任何 STEP 内]：
-  CUSTOM chatagents.title / chatagents.usage(role="auxiliary") / chatagents.span（标题跨度）
 RUN_FINISHED | RUN_ERROR
 ```
+
+新主运行 SSE 不再发送 `chatagents.title`，也不再有 `role="auxiliary"` 的标题
+用量或标题跨度（issue #93）——标题生成已切到会话级独立 HTTP 接口，不再属于
+主运行生命周期。上面是当前全部线格式；`STEP_STARTED` 之前不会插入任何
+`CUSTOM` 事件。
 
 ## 合并规则（`live-merge.ts` 的 `mergeTraceEvent` 实现）
 
@@ -37,7 +40,10 @@ RUN_FINISHED | RUN_ERROR
 2. `chatagents.usage` 的 `role` 字段决定路由：`main` → 挂到当前迭代分组的
    模型跨度；`auxiliary` → 挂到独立的「标题」兄弟槽位，不进任何迭代分组。
    **紧跟着到达的 `chatagents.span`（它本身不带 role）复用上一条 usage 的
-   路由目标**——这是两条 `CUSTOM` 事件的到达顺序保证，不是猜测。
+   路由目标**——这是两条 `CUSTOM` 事件的到达顺序保证，不是猜测。新主运行不再
+   发出 `auxiliary` 用量（issue #93），这条分支只为兼容旧流量与原生 AG-UI
+   客户端保留。新标题观测独立归属会话，由只读接口提供，不进入主运行 trace；
+   当前会话列表不提供标题观测入口（见下）。
 3. `TOOL_CALL_START` 在当前迭代分组内按到达顺序追加一个工具跨度占位；
    `TOOL_CALL_END` 标记结束时刻；`chatagents.tool_result` 按 `tool_call_id`
    回填卡片字段（`structured`、`result`、`duration_ms`）；`TOOL_CALL_RESULT`
@@ -62,6 +68,12 @@ RUN_FINISHED | RUN_ERROR
 `parent_span_id` 落好树，不需要重新按事件到达顺序拼：`kind:"llm",
 role:"main"` 的顶层跨度各自是一个迭代分组，其下 `kind:"tool"` 的子跨度是
 该迭代内的工具调用；`role:"auxiliary"` 的顶层跨度是独立的标题兄弟跨度。
+
+后端保留 `GET /api/sessions/{session_id}/title-generation`：查询会话级标题跨度，
+并兼容旧 `name="title_generation"`、`role="auxiliary"` 的运行标题跨度。
+当前会话列表不提供详情按钮或展开区，也不请求该接口；其他页面的展示入口后续另行设计。
+旧标题跨度仍留在原运行树里、原样保留；此处不做回算，缺少模型/用量/原因时不补造记录，
+也不根据当前标题反推。
 
 历史视图**没有独立的思考耗时字段**——持久化只有 `display_summary.text/status`，
 模型跨度的总耗时含生成时间，不是思考耗时，因此历史视图的推理行不显示秒数，

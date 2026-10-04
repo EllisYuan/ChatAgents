@@ -7,12 +7,21 @@ from dataclasses import dataclass
 from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db.obs import Run, Span
 from ..llm.events import UsageState
-from .models import DisplaySummary, RunDetail, RunSummary, SpanView, ToolResultView, UsageAggregate
+from .models import (
+    DisplaySummary,
+    RunDetail,
+    RunSummary,
+    SpanView,
+    TitleGenerationObservation,
+    TitleGenerationSpan,
+    ToolResultView,
+    UsageAggregate,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +51,22 @@ class ObservabilityRepository:
             for row in result.scalars()
         ]
 
+    async def get_title_generation(self, session_id: UUID) -> TitleGenerationObservation:
+        result = await self.session.execute(
+            select(Span)
+            .outerjoin(Run, Span.run_id == Run.id)
+            .where(
+                Span.name == "title_generation",
+                Span.role == "auxiliary",
+                or_(Span.session_id == session_id, Run.session_id == session_id),
+            )
+            .order_by(Span.started_at.desc(), Span.id.desc())
+        )
+        return TitleGenerationObservation(
+            session_id=session_id,
+            spans=[_title_generation_span(span) for span in result.scalars()],
+        )
+
     async def get_run(self, run_id: UUID) -> RunObservation | None:
         run_result = await self.session.execute(select(Run).where(Run.id == run_id))
         run = run_result.scalar_one_or_none()
@@ -57,6 +82,41 @@ class ObservabilityRepository:
         if observation is None:
             return None
         return _run_detail(observation)
+
+
+def _title_generation_span(span: Span) -> TitleGenerationSpan:
+    attributes = span.attributes if isinstance(span.attributes, dict) else {}
+    effort = attributes.get("effort")
+    duration_ms = (
+        round((span.ended_at - span.started_at).total_seconds() * 1000)
+        if span.ended_at is not None
+        else None
+    )
+    return TitleGenerationSpan(
+        id=span.id,
+        model=span.model,
+        effort=effort if isinstance(effort, str) else None,
+        status=span.status,
+        usage_status=cast(UsageState | None, span.usage_status),
+        input_tokens=span.input_tokens,
+        output_tokens=span.output_tokens,
+        reasoning_tokens=span.reasoning_tokens,
+        started_at=span.started_at,
+        ended_at=span.ended_at,
+        duration_ms=duration_ms,
+        application_result=(
+            attributes["application_result"]
+            if attributes.get("application_result")
+            in {"applied", "manual_not_applied", "deleted_not_applied"}
+            else None
+        ),
+        failure_reason=(
+            attributes["failure_reason"]
+            if attributes.get("failure_reason")
+            in {"upstream", "empty_output", "missing_terminal", "timeout", "cancelled"}
+            else None
+        ),
+    )
 
 
 def _protocol(span: Span) -> str | None:

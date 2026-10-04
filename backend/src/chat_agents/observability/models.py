@@ -75,6 +75,46 @@ class SpanView(BaseModel):
     _protocol: str | None = PrivateAttr(default=None)
 
 
+class TitleGenerationSpan(BaseModel):
+    """一次标题生成的观测事实（ADR-0035）。
+
+    只暴露白名单字段：真列用量、实际模型、时间、状态，以及从 ``attributes``
+    摘出的 ``effort`` / ``application_result`` / ``failure_reason``。不暴露
+    ``key_source`` 或完整 ``attributes``——密钥来源与原始属性不进公开载荷。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: UUID
+    model: str | None
+    effort: str | None
+    status: str
+    usage_status: UsageState | None
+    input_tokens: int | None
+    output_tokens: int | None
+    reasoning_tokens: int | None
+    started_at: datetime
+    ended_at: datetime | None
+    duration_ms: int | None
+    application_result: Literal["applied", "manual_not_applied", "deleted_not_applied"] | None = (
+        None
+    )
+    failure_reason: (
+        Literal["upstream", "empty_output", "missing_terminal", "timeout", "cancelled"] | None
+    ) = None
+
+
+class TitleGenerationObservation(BaseModel):
+    """``GET /api/sessions/{session_id}/title-generation`` 的只读载荷。
+
+    合并直属 ``session_id`` 的独立标题跨度与经 ``obs.run.session_id`` 找到的
+    历史运行标题跨度；没有跨度时返回空列表，不读业务 ``title`` 反推。
+    """
+
+    session_id: UUID
+    spans: list[TitleGenerationSpan]
+
+
 class RunDetail(BaseModel):
     """单次运行的运行级配置、用量汇总与完整跨度树。"""
 

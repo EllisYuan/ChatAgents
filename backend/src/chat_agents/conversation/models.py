@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from datetime import datetime
-from typing import Any, cast
+from typing import Any, Literal, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -24,6 +24,7 @@ from ..llm.message import (
     ToolCallBlock,
     ToolResultBlock,
 )
+from ..llm.override import ModelOverride
 from ..llm.protocol import PROTOCOLS, Protocol
 from ..validation import MAX_MESSAGE_LENGTH, MAX_TITLE_LENGTH, validate_non_blank
 
@@ -64,6 +65,31 @@ class MessageView(BaseModel):
 
 class SessionDetail(SessionView):
     messages: list[MessageView] = Field(default_factory=list)
+
+
+TitleGenerationStatus = Literal[
+    "applied", "fallback", "generating", "processed", "manual_not_applied"
+]
+
+
+class TitleGenerationRequest(BaseModel):
+    """``POST /api/sessions/{session_id}/title`` 的请求体。
+
+    只承载发送首条消息时的客户端配置快照；标题素材、历史、``force`` 与
+    ``effort`` 均由服务端决定，不接受客户端提交（ADR-0036）。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    model_override: ModelOverride | None = None
+
+
+class TitleGenerationResponse(BaseModel):
+    """标题生成接口的业务响应；不混入观测 token 或 Trace 数据。"""
+
+    session_id: UUID
+    title: str | None
+    status: TitleGenerationStatus
 
 
 class RenameSessionRequest(BaseModel):

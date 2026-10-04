@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { getSessionDetail, getSessionRuns } from "../../api/client";
+import {
+  generateSessionTitle,
+  getSessionDetail,
+  getSessionRuns,
+  type TitleGenerationRequest,
+} from "../../api/client";
 import {
   CUSTOM_PROFILE,
   buildModelOverride,
@@ -8,6 +13,7 @@ import {
   persistSessionModelConfig,
   restoreSessionModelConfig,
   useModelOptionsStore,
+  type ModelOverrideDecision,
 } from "../../stores/model-options-store";
 import { useSessionListStore } from "../../stores/session-list-store";
 import { useTraceStream } from "../trace/useTraceStream";
@@ -44,10 +50,17 @@ export function useAgentRun(sessionId: string) {
   const { trees: traces, startTrace, handleTraceEvent } = useTraceStream();
   const abortRef = useRef<AbortController | null>(null);
   const stoppedRef = useRef(false);
+  const titleAbortRef = useRef<AbortController | null>(null);
+  const titleEligibleRef = useRef(false);
+  const titleAttemptedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
     abortRef.current?.abort();
+    titleAbortRef.current?.abort();
+    titleAbortRef.current = null;
+    titleEligibleRef.current = false;
+    titleAttemptedRef.current = false;
     setHistoryLoaded(false);
     setSessionExists(null);
     setPhase("idle");
@@ -62,6 +75,9 @@ export function useAgentRun(sessionId: string) {
       if (cancelled) return;
       const exists = detail !== null;
       setSessionExists(exists);
+      // 只有新会话才有「首次自动生成标题」资格；已有会话（含仅刷新、重新进入）
+      // 一律不补发，资格由服务端原子认领兜底（issue #93）。
+      titleEligibleRef.current = !exists;
       const restored = restoreSessionModelConfig(sessionId, exists);
       hasSessionConfigRef.current = restored !== null;
       if (restored) setEffort(restored.effort);
@@ -79,7 +95,42 @@ export function useAgentRun(sessionId: string) {
     };
   }, [sessionId]);
 
-  useEffect(() => () => abortRef.current?.abort(), []);
+  useEffect(
+    () => () => {
+      abortRef.current?.abort();
+      titleAbortRef.current?.abort();
+    },
+    [],
+  );
+
+  /**
+   * 首次 `RUN_STARTED` 后尽早发起独立标题调用（issue #93）。快照来自发送时的
+   * `executeSend` 闭包，不在异步触发时重读界面配置；主运行的停止/失败/收尾都不
+   * 取消它。best-effort：失败、超时或取消都保留 fallback，不回落到主回答错误区。
+   */
+  const startTitleGeneration = useCallback(
+    (targetSessionId: string, override: ModelOverrideDecision) => {
+      if (!titleEligibleRef.current || titleAttemptedRef.current) return;
+      titleAttemptedRef.current = true;
+      const controller = new AbortController();
+      titleAbortRef.current = controller;
+      const request: TitleGenerationRequest =
+        override.kind === "override" ? { model_override: override.override } : {};
+      void generateSessionTitle(targetSessionId, request, controller.signal)
+        .then((response) => {
+          if (controller.signal.aborted) return;
+          // 只应用服务端返回的「实际生效」标题；store 另有人工改名保护，迟到的
+          // 结果不会覆盖本地改名，删除后也不会复活（issue #93）。
+          if (response.title) {
+            useSessionListStore.getState().applyTitle(response.session_id, response.title);
+          }
+        })
+        .catch(() => {
+          // 标题是 metadata best-effort：失败/取消/超时都保留 fallback，不提示。
+        });
+    },
+    [],
+  );
 
   const executeSend = useCallback(
     async (text: string, selectedEffort: EffortTier, forceSystemDefault = false) => {
@@ -150,9 +201,11 @@ export function useAgentRun(sessionId: string) {
             onToolEnded() { setActiveTool(null); },
             onUsage(payload) {
               if (payload.usage_status !== "complete") { usageIncomplete = true; return; }
-              tokens += (payload.input_tokens ?? 0) + (payload.output_tokens ?? 0) + (payload.reasoning_tokens ?? 0);
+              // 主运行摘要只统计主处理的输入+输出；`reasoning_tokens` 是
+              // `output_tokens` 的子集，重复累加会把它算两次（issue #93）。
+              tokens += (payload.input_tokens ?? 0) + (payload.output_tokens ?? 0);
             },
-            onTitleGenerated(titleSessionId, title) { useSessionListStore.getState().applyTitle(titleSessionId, title); },
+            onRunStarted() { startTitleGeneration(sessionId, decision); },
             onRunFinished() { finished = true; },
             onRunError(message) { failed = true; setErrors((prev) => ({ ...prev, [assistantId]: message })); },
             onTraceEvent(envelope) { handleTraceEvent(assistantId, envelope); },
@@ -180,7 +233,7 @@ export function useAgentRun(sessionId: string) {
         tokens: disconnected || usageIncomplete ? null : tokens,
       } }));
     },
-    [handleTraceEvent, sessionId, startTrace],
+    [handleTraceEvent, sessionId, startTitleGeneration, startTrace],
   );
 
   const sendMessage = useCallback(async (text: string, selectedEffort: EffortTier = effort): Promise<boolean> => {

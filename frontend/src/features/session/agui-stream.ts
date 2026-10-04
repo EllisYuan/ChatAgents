@@ -5,7 +5,6 @@ import type { components } from "../../generated/api";
 type RunRequest = components["schemas"]["RunRequest"];
 type ProblemDetails = components["schemas"]["ProblemDetails"];
 type UsagePayload = components["schemas"]["ChatAgentsUsagePayload"];
-type TitlePayload = components["schemas"]["ChatAgentsTitlePayload"];
 
 interface RunStreamHandlers {
   onTextDelta(delta: string): void;
@@ -13,7 +12,11 @@ interface RunStreamHandlers {
   onToolStarted(toolCallId: string, name: string): void;
   onToolEnded(toolCallId: string): void;
   onUsage(payload: UsagePayload): void;
-  onTitleGenerated(sessionId: string, title: string): void;
+  /**
+   * `RUN_STARTED` 到达——主运行的第一个信封（issue #93）。标题生成不再属于
+   * 主运行生命周期，由前端在这一刻用发送时的配置快照独立发起 HTTP 调用。
+   */
+  onRunStarted(): void;
   onRunFinished(): void;
   onRunError(message: string): void;
   /**
@@ -118,6 +121,9 @@ function dispatch(envelope: RunEnvelope, handlers: RunStreamHandlers): void {
     handlers.onTraceEvent?.(envelope);
   }
   switch (envelope.type) {
+    case "RUN_STARTED":
+      handlers.onRunStarted();
+      break;
     case "TEXT_MESSAGE_CONTENT":
       handlers.onTextDelta(envelope.delta ?? "");
       break;
@@ -133,9 +139,6 @@ function dispatch(envelope: RunEnvelope, handlers: RunStreamHandlers): void {
     case "CUSTOM":
       if (envelope.name === "chatagents.usage") {
         handlers.onUsage(envelope.value as UsagePayload);
-      } else if (envelope.name === "chatagents.title") {
-        const payload = envelope.value as TitlePayload;
-        handlers.onTitleGenerated(payload.session_id, payload.title);
       }
       break;
     case "RUN_FINISHED":

@@ -155,6 +155,25 @@ async def _seed_observation(
         )
         session.add(
             Span(
+                id=uuid4(),
+                run_id=run_id,
+                parent_span_id=None,
+                name="title_generation",
+                kind="llm",
+                status="error",
+                role="auxiliary",
+                model="actual-title-model",
+                input_tokens=None,
+                output_tokens=None,
+                usage_status="unavailable",
+                reasoning_tokens=None,
+                attributes={"key_source": "user_provided", "protocol": "openai_responses"},
+                started_at=now + timedelta(seconds=2),
+                ended_at=now + timedelta(seconds=3),
+            )
+        )
+        session.add(
+            Span(
                 id=tool_id,
                 run_id=run_id,
                 parent_span_id=root_id,
@@ -243,7 +262,7 @@ def test_run_detail_returns_tree_aggregates_and_protocol_specific_fields() -> No
                 },
             ]
             roots = body["spans"]
-            assert len(roots) == 2
+            assert len(roots) == 3
             main_span = next(span for span in roots if span["model"] == "gpt-main")
             assert main_span["display_summary"] == {
                 "text": "先查资料",

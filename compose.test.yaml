@@ -1,0 +1,5 @@
+services:
+  postgresql:
+    container_name: !reset null
+    ports: !override
+      - "127.0.0.1:${CHATAGENTS_TEST_DB_PORT:-55432}:5432"

@@ -58,8 +58,15 @@ htmlcov/
 *.tmp
 *.bak
 
-# Agent 工作草稿
+# Agent 工作草稿与本地工具配置
 .scratch/
+.codex/
+.agents/
+.claude/agents/
+.claude/skills/
+.github/agents/
+.github/hooks/
+.github/skills/
 
 # MCP 本地配置（含数据库凭据，勿入库）
 .mcp.json

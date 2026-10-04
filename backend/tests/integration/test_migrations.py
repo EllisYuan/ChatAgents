@@ -163,7 +163,13 @@ def test_upgrade_head_creates_application_and_observability_schemas() -> None:
             "reasoning_tokens",
         } <= span_columns
 
-        assert "pruned_run_count" in session_columns
+        assert {
+            "pruned_run_count",
+            "title_generation_eligible",
+            "title_generation_claimed_at",
+            "title_manually_edited",
+            "title_generation_outcome",
+        } <= session_columns
 
         cost_like = {
             (schema_name, table_name, column_name)

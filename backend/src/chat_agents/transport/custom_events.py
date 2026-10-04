@@ -1,4 +1,4 @@
-"""三个自有 `Custom` 载荷（ADR-0009/0021）。
+"""三个主运行自有 `Custom` 载荷（ADR-0009/0021）。
 
 AG-UI 的 `CustomEvent` 只约束信封 `{name, value}`，`value` 是 `Any`——三个
 载荷是整份契约里唯一无人替我们把关的部分，因此单独建 Pydantic 模型，供
@@ -57,10 +57,3 @@ class ToolResultPayload(BaseModel):
     duration_ms: int
     structured: dict[str, Any] | None
     status: Literal["ok", "error"]
-
-
-class TitlePayload(BaseModel):
-    """`chatagents.title`——首轮生成或回落后的会话标题。"""
-
-    session_id: str
-    title: str

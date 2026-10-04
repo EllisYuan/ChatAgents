@@ -1,13 +1,16 @@
-"""首轮标题生成：``AgentRunner`` 的 auxiliary 调用边界。"""
+"""标题生成已移出主运行（issue #93）：``AgentRunner`` 不再拥有标题职责。
+
+旧边界测试（``generate_title`` / ``TitleGenerationStarted`` / ``TitleGenerated``）
+整体废弃；这里断言主运行事件流里没有任何标题数据，且只触发一次主模型调用。
+"""
 
 from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
 from typing import Any
-from uuid import uuid4
 
-from chat_agents.agent.events import TitleGenerated, TitleGenerationStarted
+from chat_agents.agent.events import IterationStarted, RunCompleted
 from chat_agents.agent.runner import AgentRunner
 from chat_agents.agent.tool_executor import ToolExecutor
 from chat_agents.llm.effort import EffortTier
@@ -17,7 +20,7 @@ from chat_agents.llm.profile import EndpointProfile
 from pydantic import SecretStr
 
 
-class _ParallelPort:
+class _RecordingPort:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
 
@@ -40,27 +43,12 @@ class _ParallelPort:
                 "system_prompt": system_prompt,
             }
         )
-        if model == "aux-model":
-            await asyncio.sleep(0)
-            yield TextDelta(text="关于 Python 的标题")
-            yield ModelCallCompleted(
-                message=ModelMessage(
-                    role="assistant", content=(TextBlock(text="关于 Python 的标题"),)
-                ),
-                usage=Usage(
-                    state="complete", input_tokens=4, output_tokens=3, reasoning_tokens=None
-                ),
-                stop_reason="end_turn",
-            )
-        else:
-            yield TextDelta(text="回答")
-            yield ModelCallCompleted(
-                message=ModelMessage(role="assistant", content=(TextBlock(text="回答"),)),
-                usage=Usage(
-                    state="complete", input_tokens=5, output_tokens=2, reasoning_tokens=None
-                ),
-                stop_reason="end_turn",
-            )
+        yield TextDelta(text="回答")
+        yield ModelCallCompleted(
+            message=ModelMessage(role="assistant", content=(TextBlock(text="回答"),)),
+            usage=Usage(state="complete", input_tokens=5, output_tokens=2, reasoning_tokens=None),
+            stop_reason="end_turn",
+        )
 
 
 def _profile() -> EndpointProfile:
@@ -73,8 +61,8 @@ def _profile() -> EndpointProfile:
     )
 
 
-def test_first_run_generates_title_with_auxiliary_model() -> None:
-    port = _ParallelPort()
+def test_main_run_emits_no_title_events() -> None:
+    port = _RecordingPort()
     runner = AgentRunner(tool_executor=ToolExecutor({}), model_port_factory=lambda _p: port)
 
     async def collect() -> list[Any]:
@@ -84,82 +72,18 @@ def test_first_run_generates_title_with_auxiliary_model() -> None:
                 [ModelMessage(role="user", content=(TextBlock(text="请介绍 Python"),))],
                 profile=_profile(),
                 main_model="main-model",
-                auxiliary_model="aux-model",
                 effort="low",
                 http_client=object(),
                 run_id="run-1",
-                session_id=uuid4(),
-                generate_title=True,
             )
         ]
 
     events = asyncio.run(collect())
 
-    started = next(event for event in events if isinstance(event, TitleGenerationStarted))
-    generated = next(event for event in events if isinstance(event, TitleGenerated))
-    assert started.model == "aux-model"
-    assert generated.title == "关于 Python 的标题"
-    assert generated.usage is not None
-    assert {call["model"] for call in port.calls} == {"aux-model", "main-model"}
-    title_call = next(call for call in port.calls if call["model"] == "aux-model")
-    assert title_call["tools"] == []
-    assert title_call["messages"] == [
-        ModelMessage(role="user", content=(TextBlock(text="请介绍 Python"),))
-    ]
-    assert title_call["system_prompt"]
-
-
-def test_auxiliary_failure_falls_back_without_failing_main_run() -> None:
-    class _FailingAuxiliaryPort(_ParallelPort):
-        async def stream(
-            self,
-            *,
-            messages: Any,
-            tools: Any,
-            model: str,
-            effort: EffortTier,
-            profile: EndpointProfile,
-            system_prompt: str | None = None,
-        ) -> AsyncIterator[ModelEvent]:
-            if model == "aux-model":
-                raise RuntimeError("标题上游不可用")
-                yield  # pragma: no cover
-            async for event in super().stream(
-                messages=messages,
-                tools=tools,
-                model=model,
-                effort=effort,
-                profile=profile,
-                system_prompt=system_prompt,
-            ):
-                yield event
-
-    port = _FailingAuxiliaryPort()
-    runner = AgentRunner(tool_executor=ToolExecutor({}), model_port_factory=lambda _p: port)
-
-    async def collect() -> list[Any]:
-        return [
-            event
-            async for event in runner.run(
-                [
-                    ModelMessage(
-                        role="user",
-                        content=(TextBlock(text="这是一个非常长的首条用户消息，用于验证回落标题"),),
-                    )
-                ],
-                profile=_profile(),
-                main_model="main-model",
-                auxiliary_model="aux-model",
-                effort="low",
-                http_client=object(),
-                run_id="run-failure",
-                session_id=uuid4(),
-                generate_title=True,
-            )
-        ]
-
-    events = asyncio.run(collect())
-    generated = next(event for event in events if isinstance(event, TitleGenerated))
-    assert generated.error == "标题上游不可用"
-    assert generated.title == "这是一个非常长的首条用户消息，用于验证回落标题"
-    assert not any(type(event).__name__ == "RunFailed" for event in events)
+    assert not any(
+        type(event).__name__ in {"TitleGenerated", "TitleGenerationStarted"} for event in events
+    )
+    # 主运行只调用主模型一次；没有额外的 auxiliary 调用。
+    assert [call["model"] for call in port.calls] == ["main-model"]
+    assert isinstance(events[0], IterationStarted)
+    assert isinstance(events[-1], RunCompleted)

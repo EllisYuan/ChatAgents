@@ -26,7 +26,7 @@ from .endpoint_gateway import ANSWER, API_KEY, AUXILIARY_MODEL, MODEL, endpoint_
         ("/v1/chat/completions", True, "/v1"),
     ],
 )
-def test_custom_endpoint_discovery_and_run_share_one_address(
+def test_custom_endpoint_discovery_run_and_title_share_one_address(
     monkeypatch: pytest.MonkeyPatch,
     base_path: str,
     full_url: bool | None,
@@ -75,13 +75,31 @@ def test_custom_endpoint_discovery_and_run_share_one_address(
                         for line in response.text.splitlines()
                         if line.startswith("data: ")
                     ]
+                    # 标题是独立的会话调用（issue #93）：同一份自定义覆盖，单独
+                    # 向同一个自定义端点发一次 auxiliary 请求。
+                    title = await client.post(
+                        f"/api/sessions/{session_id}/title",
+                        json={
+                            "model_override": {
+                                **endpoint,
+                                "main_model": MODEL,
+                                "auxiliary_model": AUXILIARY_MODEL,
+                            }
+                        },
+                    )
+                    assert title.status_code == 200
+                    assert title.json()["status"] == "applied"
+                    assert title.json()["title"] == ANSWER
 
                 types = [frame["type"] for frame in frames]
                 assert "RUN_FINISHED" in types
                 assert "RUN_ERROR" not in types
                 assert "TEXT_MESSAGE_CONTENT" in types
+                # 主事件流不含标题事件。
+                assert not any(frame.get("name") == "chatagents.title" for frame in frames)
 
                 assert gateway.requests[0] == ("GET", prefix + "/models", None)
+                # 主运行打主模型、独立标题调用打 auxiliary——共用同一个自定义端点。
                 assert sorted(gateway.requests[1:]) == sorted(
                     [
                         ("POST", prefix + "/chat/completions", MODEL),
@@ -107,6 +125,10 @@ def test_custom_endpoint_discovery_and_run_share_one_address(
                     for span in spans:
                         assert span.attributes["protocol"] == "openai_chat_completions"
                         assert span.attributes["key_source"] == "user_provided"
+                    title_span = next(span for span in spans if span.role == "auxiliary")
+                    assert title_span.run_id is None
+                    assert title_span.session_id == session_id
+                    assert title_span.parent_span_id is None
                     assert ANSWER in json.dumps(messages[1].content)
                     saved_session = await session.get(Session, session_id)
                     assert saved_session is not None and saved_session.title == ANSWER
@@ -194,10 +216,11 @@ def test_an_opaque_full_url_runs_but_reports_no_catalog(monkeypatch: pytest.Monk
                     # 推不出清单地址就不发请求，这一步必须零 HTTP。
                     assert gateway.requests == []
 
+                    session_id = uuid4()
                     response = await client.post(
                         "/api/runs",
                         json={
-                            "session_id": str(uuid4()),
+                            "session_id": str(session_id),
                             "message": "hi",
                             "model_override": {**endpoint, "main_model": MODEL},
                         },
@@ -207,9 +230,17 @@ def test_an_opaque_full_url_runs_but_reports_no_catalog(monkeypatch: pytest.Monk
                         for line in response.text.splitlines()
                         if line.startswith("data: ")
                     ]
+                    # 独立标题调用同样打这条完整 URL。
+                    title = await client.post(
+                        f"/api/sessions/{session_id}/title",
+                        json={"model_override": {**endpoint, "main_model": MODEL}},
+                    )
+                    assert title.status_code == 200
+                    assert title.json()["status"] == "applied"
 
                 assert "RUN_FINISHED" in types
                 assert "RUN_ERROR" not in types
+                # 主运行与独立标题调用各发一次，都走这条完整 URL。
                 assert [request[1] for request in gateway.requests] == ["/custom/infer"] * 2
                 async with factory() as session:
                     run = (await session.execute(select(Run))).scalar_one()

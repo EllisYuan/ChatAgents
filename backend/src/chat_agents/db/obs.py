@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime
 from typing import ClassVar
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -69,13 +69,22 @@ class Span(Base):
     """
 
     __tablename__ = "span"
-    __table_args__: ClassVar[dict] = {"schema": OBSERVABILITY_SCHEMA}
+    __table_args__ = (
+        CheckConstraint("(run_id IS NULL) <> (session_id IS NULL)", name="ck_obs_span_one_owner"),
+        CheckConstraint(
+            "session_id IS NULL OR parent_span_id IS NULL", name="ck_obs_span_session_root"
+        ),
+        {"schema": OBSERVABILITY_SCHEMA},
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
     )
-    run_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey(f"{OBSERVABILITY_SCHEMA}.run.id"), nullable=False, index=True
+    run_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey(f"{OBSERVABILITY_SCHEMA}.run.id"), nullable=True, index=True
+    )
+    session_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey(f"{APP_SCHEMA}.session.id"), nullable=True, index=True
     )
     parent_span_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey(f"{OBSERVABILITY_SCHEMA}.span.id")

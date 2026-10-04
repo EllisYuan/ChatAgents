@@ -36,10 +36,15 @@ class ConversationRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def get_session(self, session_id: UUID) -> Session | None:
-        result = await self.session.execute(
-            select(Session).where(Session.id == session_id, Session.deleted_at.is_(None))
-        )
+    async def get_session(
+        self, session_id: UUID, *, populate_existing: bool = False
+    ) -> Session | None:
+        statement = select(Session).where(Session.id == session_id, Session.deleted_at.is_(None))
+        if populate_existing:
+            # 条件 UPDATE 走的是 SQL，identity map 里的旧对象不会自动刷新；同一短事务
+            # 内的重读必须强制回读，才能看到并发输家/终态的真实列值。
+            statement = statement.execution_options(populate_existing=True)
+        result = await self.session.execute(statement)
         row: Session | None = result.scalar_one_or_none()
         return row
 
@@ -86,12 +91,12 @@ class ConversationRepository:
         )
         return [(row, int(count)) for row, count in result.all()]
 
-    async def upsert_session(self, session_id: UUID) -> Session:
+    async def upsert_session(self, session_id: UUID, *, title_eligible: bool = False) -> Session:
         """Insert a live session if absent, without reviving a soft-deleted row."""
 
         statement = (
             insert(Session)
-            .values(id=session_id)
+            .values(id=session_id, title_generation_eligible=title_eligible)
             .on_conflict_do_nothing(index_elements=[Session.id])
         )
         await self.session.execute(statement)
@@ -102,38 +107,132 @@ class ConversationRepository:
         return row
 
     async def rename_session(self, session_id: UUID, title: str | None) -> Session | None:
-        row = await self.get_session(session_id)
-        if row is None:
-            return None
-        row.title = title
-        await self.session.flush()
-        return row
-
-    async def set_title_if_missing(self, session_id: UUID, title: str) -> bool:
-        """仅在标题仍为空时写入，保护人工改名与并发首轮结果。"""
-
         result = await self.session.execute(
             update(Session)
-            .where(Session.id == session_id, Session.deleted_at.is_(None), Session.title.is_(None))
+            .where(Session.id == session_id, Session.deleted_at.is_(None))
+            .values(title=title, title_manually_edited=True, title_generation_eligible=False)
+            .returning(Session)
+        )
+        row: Session | None = result.scalar_one_or_none()
+        return row
+
+    async def set_fallback_title(self, session_id: UUID, title: str) -> None:
+        await self.session.execute(
+            update(Session)
+            .where(
+                Session.id == session_id,
+                Session.deleted_at.is_(None),
+                Session.title.is_(None),
+                Session.title_generation_eligible.is_(True),
+                Session.title_generation_claimed_at.is_(None),
+                Session.title_manually_edited.is_(False),
+            )
             .values(title=title)
+        )
+
+    async def claim_title_generation(self, session_id: UUID) -> bool:
+        result = await self.session.execute(
+            update(Session)
+            .where(
+                Session.id == session_id,
+                Session.deleted_at.is_(None),
+                Session.title.is_not(None),
+                Session.title_generation_eligible.is_(True),
+                Session.title_generation_claimed_at.is_(None),
+                Session.title_manually_edited.is_(False),
+            )
+            .values(title_generation_claimed_at=func.now())
         )
         return getattr(result, "rowcount", 0) == 1
 
-    async def replace_title_if_current(
-        self, session_id: UUID, *, expected_title: str, title: str
-    ) -> bool:
-        """仅替换本次首轮 claim 的 fallback，不覆盖人工改名。"""
+    async def first_user_text(self, session_id: UUID) -> str | None:
+        """返回会话中 ``seq`` 最小的用户消息的纯文本；素材只此一处。"""
+
+        result = await self.session.execute(
+            select(Message.content)
+            .join(Session, Session.id == Message.session_id)
+            .where(
+                Message.session_id == session_id,
+                Message.role == "user",
+                Session.deleted_at.is_(None),
+            )
+            .order_by(Message.seq.asc())
+            .limit(1)
+        )
+        content = result.scalar_one_or_none()
+        if not content:
+            return None
+        return "".join(
+            str(block.get("text", ""))
+            for block in content
+            if isinstance(block, dict) and block.get("type") == "text"
+        )
+
+    async def apply_generated_title_terminal(self, session_id: UUID, title: str) -> str | None:
+        """条件应用模型标题并写下 ``applied`` 终态；失败返回 None。
+
+        条件是已认领、未终态、仍合格且未经人工改名，不比较标题文字——因此人工
+        改成与模型结果相同的文字同样不会被应用（ADR-0037）。
+        """
 
         result = await self.session.execute(
             update(Session)
             .where(
                 Session.id == session_id,
                 Session.deleted_at.is_(None),
-                Session.title == expected_title,
+                Session.title_generation_claimed_at.is_not(None),
+                Session.title_generation_outcome.is_(None),
+                Session.title_generation_eligible.is_(True),
+                Session.title_manually_edited.is_(False),
             )
-            .values(title=title)
+            .values(
+                title=title, title_generation_eligible=False, title_generation_outcome="applied"
+            )
+            .returning(Session.title)
         )
-        return getattr(result, "rowcount", 0) == 1
+        applied: str | None = result.scalar_one_or_none()
+        return applied
+
+    async def record_title_terminal(self, session_id: UUID, *, outcome: str) -> str | None:
+        """写下一次已认领尝试的终态（``fallback`` 或 ``manual_not_applied``）。
+
+        只在已认领且尚未终态时生效，返回当前标题；重复终态写不回滚已记录的事实。
+        """
+
+        result = await self.session.execute(
+            update(Session)
+            .where(
+                Session.id == session_id,
+                Session.deleted_at.is_(None),
+                Session.title_generation_claimed_at.is_not(None),
+                Session.title_generation_outcome.is_(None),
+            )
+            .values(title_generation_outcome=outcome, title_generation_eligible=False)
+            .returning(Session.title)
+        )
+        recorded: str | None = result.scalar_one_or_none()
+        return recorded
+
+    async def apply_generated_title(self, session_id: UUID, title: str) -> str | None:
+        result = await self.session.execute(
+            update(Session)
+            .where(
+                Session.id == session_id,
+                Session.deleted_at.is_(None),
+                Session.title_generation_claimed_at.is_not(None),
+                Session.title.is_not(None),
+                Session.title_generation_eligible.is_(True),
+                Session.title_manually_edited.is_(False),
+            )
+            .values(title=title, title_generation_eligible=False)
+            .returning(Session.title)
+        )
+        applied: str | None = result.scalar_one_or_none()
+        if applied is not None:
+            return applied
+        row = await self.get_session(session_id)
+        current_title: str | None = row.title if row is not None else None
+        return current_title
 
     async def soft_delete_session(self, session_id: UUID) -> bool:
         result = await self.session.execute(
