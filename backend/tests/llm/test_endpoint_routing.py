@@ -38,14 +38,20 @@ async def _generate(profile: EndpointProfile) -> ModelCallCompleted:
 
 
 def _profile(
-    origin: str, base_path: str, protocol: Protocol, mode: AddressMode = "sdk_native"
+    origin: str,
+    base_path: str,
+    protocol: Protocol,
+    mode: AddressMode = "sdk_native",
+    *,
+    auth_field: str = "Authorization",
+    api_key: str = API_KEY,
 ) -> EndpointProfile:
     return EndpointProfile(
         name="fixture",
         protocol=protocol,
         base_url=origin + base_path,
-        auth_field="Authorization",
-        api_key=SecretStr(API_KEY),
+        auth_field=auth_field,
+        api_key=SecretStr(api_key),
         address_mode=mode,
     )
 
@@ -105,9 +111,129 @@ def test_rewriting_the_generation_url_keeps_the_key_and_body_intact() -> None:
             await _generate(profile)
 
             assert gateway.requests == [("POST", "/custom/infer", MODEL)]
-            assert gateway.headers[0]["authorization"] == API_KEY
+            assert gateway.headers[0]["authorization"] == f"Bearer {API_KEY}"
             assert gateway.headers[0]["host"] == gateway.origin.removeprefix("http://")
             assert gateway.payloads[0]["messages"][0]["content"] == "hi"
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "protocol", ["openai_chat_completions", "openai_responses", "anthropic_messages"]
+)
+def test_bearer_gateway_accepts_generation_with_a_bearer_header(protocol: Protocol) -> None:
+    async def scenario() -> None:
+        path = (
+            "/v1/messages"
+            if protocol == "anthropic_messages"
+            else ("/v1/responses" if protocol == "openai_responses" else "/v1/chat/completions")
+        )
+        with endpoint_gateway(
+            {("POST", path): protocol},
+            required_authorization=f"Bearer {API_KEY}",
+        ) as gateway:
+            profile = _profile(
+                gateway.origin,
+                "/v1" if protocol != "anthropic_messages" else "",
+                protocol,
+            )
+            try:
+                await _generate(profile)
+            finally:
+                assert gateway.headers[0]["authorization"] == f"Bearer {API_KEY}"
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "protocol", ["openai_chat_completions", "openai_responses", "anthropic_messages"]
+)
+@pytest.mark.parametrize(
+    ("auth_field", "api_key", "expected"),
+    [
+        ("authorization", API_KEY, f"Bearer {API_KEY}"),
+        ("Authorization", f"Bearer {API_KEY}", f"Bearer {API_KEY}"),
+        ("Authorization", API_KEY, f"Bearer {API_KEY}"),
+        ("x-api-key", API_KEY, API_KEY),
+        ("X-Custom-Key", API_KEY, API_KEY),
+        ("X-ChatAgents-Auth-Field", API_KEY, API_KEY),
+        ("X-ChatAgents-Auth-Field-Alt", API_KEY, API_KEY),
+    ],
+)
+def test_generation_sends_only_the_selected_auth_header(
+    protocol: Protocol, auth_field: str, api_key: str, expected: str
+) -> None:
+    async def scenario() -> None:
+        path = (
+            "/v1/messages"
+            if protocol == "anthropic_messages"
+            else ("/v1/responses" if protocol == "openai_responses" else "/v1/chat/completions")
+        )
+        with endpoint_gateway({("POST", path): protocol}) as gateway:
+            profile = _profile(
+                gateway.origin,
+                "/v1" if protocol != "anthropic_messages" else "",
+                protocol,
+                auth_field=auth_field,
+                api_key=api_key,
+            )
+            await _generate(profile)
+            headers = gateway.headers[0]
+            assert headers[auth_field.lower()] == expected
+            assert gateway.authorization_values[0] == (
+                [expected] if auth_field.lower() == "authorization" else []
+            )
+            assert gateway.api_key_values[0] == (
+                [expected] if auth_field.lower() == "x-api-key" else []
+            )
+            if auth_field.lower() != "x-chatagents-auth-field":
+                assert "x-chatagents-auth-field" not in headers
+            if auth_field.lower() != "x-chatagents-auth-field-alt":
+                assert "x-chatagents-auth-field-alt" not in headers
+            if auth_field.lower() != "authorization":
+                assert "authorization" not in headers
+            if auth_field.lower() != "x-api-key":
+                assert "x-api-key" not in headers
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("protocol", ["openai_responses", "anthropic_messages"])
+def test_shared_http_client_keeps_auth_per_profile(protocol: Protocol) -> None:
+    from chat_agents.llm.client_cache import HttpClientCache
+
+    async def scenario() -> None:
+        path = "/v1/messages" if protocol == "anthropic_messages" else "/v1/responses"
+        with endpoint_gateway({("POST", path): protocol}) as gateway:
+            cache = HttpClientCache()
+            base = "/v1" if protocol == "openai_responses" else ""
+            first = _profile(gateway.origin, base, protocol)
+            second = _profile(
+                gateway.origin,
+                base,
+                protocol,
+                auth_field="x-api-key",
+                api_key="second-fixture-secret",
+            )
+            for profile in (first, second, first):
+                port = get_model_port(profile, client_cache=cache)
+                events = [
+                    event
+                    async for event in port.stream(
+                        messages=[ModelMessage(role="user", content=(TextBlock("hi"),))],
+                        tools=[],
+                        model=MODEL,
+                        effort="medium",
+                        profile=profile,
+                    )
+                ]
+                assert any(isinstance(event, ModelCallCompleted) for event in events)
+            assert gateway.authorization_values == [
+                [f"Bearer {API_KEY}"],
+                [],
+                [f"Bearer {API_KEY}"],
+            ]
+            assert gateway.api_key_values == [[], ["second-fixture-secret"], []]
 
     asyncio.run(scenario())
 

@@ -303,6 +303,14 @@ try {
     await delay(100);
   }
   assert.ok(await evaluate("!!document.querySelector('.settings-dialog [aria-label=\"请求地址\"]')"));
+  assert.equal(await evaluate("document.querySelector('[aria-label=\"鉴权Header\"] [aria-pressed=true]').textContent.trim()"), 'Authorization');
+  assert.equal(await evaluate("document.querySelectorAll('[aria-label=\"鉴权值格式\"]').length"), 0, 'no separate authentication format selector');
+  await evaluate("[...document.querySelectorAll('[aria-label=\"鉴权Header\"] button')].find(button => button.textContent === 'x-api-key').click()");
+  await settle();
+  assert.equal(await evaluate("document.querySelector('[aria-label=\"鉴权Header\"] [aria-pressed=true]').textContent.trim()"), 'x-api-key');
+  await evaluate("[...document.querySelectorAll('[aria-label=\"鉴权Header\"] button')].find(button => button.textContent === 'Authorization').click()");
+  await settle();
+  assert.equal(await evaluate("document.querySelector('[aria-label=\"鉴权Header\"] [aria-pressed=true]').textContent.trim()"), 'Authorization');
   assert.equal(await evaluate("document.querySelectorAll('.settings-dialog .model-picker-groups').length"), 0, 'model suggestions start collapsed');
   await evaluate("document.querySelector('.protocol-picker .settings-select-trigger').click()");
   await settle();

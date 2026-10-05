@@ -76,8 +76,7 @@ def profile(name: str = "preset") -> EndpointProfile:
 def test_bearer_prefix_is_added_when_the_key_lacks_it() -> None:
     """裸密钥要补 ``Bearer `` ——官方 OpenAI 端点缺前缀直接 401（2026-09-01 实测）。
 
-    生成路径由官方 SDK 构造请求、SDK 自己补前缀；清单请求是自己发的 HTTP，
-    这一步没人替我们做。
+    只要选择 Authorization，清单与生成都自动使用 Bearer。
     """
 
     async def scenario() -> None:
@@ -93,6 +92,22 @@ def test_bearer_prefix_is_added_when_the_key_lacks_it() -> None:
         await discover_openai_models(bare, http_client=client)
 
         assert client.calls[0]["headers"] == {"Authorization": "Bearer sk-no-prefix"}
+
+    asyncio.run(scenario())
+
+
+def test_lowercase_authorization_also_uses_bearer() -> None:
+    async def scenario() -> None:
+        legacy = EndpointProfile(
+            name="legacy",
+            protocol="openai_responses",
+            base_url="https://relay.example/v1",
+            auth_field="authorization",
+            api_key=SecretStr("fixture-secret"),
+        )
+        client = FakeHttpClient(FakeResponse({"data": []}))
+        await discover_openai_models(legacy, http_client=client)
+        assert client.calls[0]["headers"] == {"authorization": "Bearer fixture-secret"}
 
     asyncio.run(scenario())
 

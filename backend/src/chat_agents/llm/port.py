@@ -23,6 +23,7 @@ from openai import AsyncOpenAI
 from .adapters.anthropic_messages import AnthropicMessagesAdapter
 from .adapters.openai_chat_completions import OpenAIChatCompletionsAdapter
 from .adapters.openai_responses import OpenAIResponsesAdapter
+from .auth import auth_headers
 from .client_cache import HttpClientCache
 from .effort import EffortTier
 from .endpoint_address import resolve_endpoint_address
@@ -88,15 +89,39 @@ def _install_generation_route(
     client.event_hooks["request"] = [*client.event_hooks["request"], route_generation]
 
 
+_AUTH_MARKERS = ("X-ChatAgents-Auth-Field", "X-ChatAgents-Auth-Field-Alt")
+
+
+async def _keep_selected_auth_header(request: Any) -> None:
+    first, second = _AUTH_MARKERS
+    marker = first if request.headers.get(first) == second.lower() else second
+    if marker not in request.headers:
+        marker = first
+    selected = request.headers.pop(marker, None)
+    if selected is None:
+        return
+    if selected != "authorization":
+        request.headers.pop("Authorization", None)
+    if selected != "x-api-key":
+        request.headers.pop("X-Api-Key", None)
+
+
 def _build_port(
     profile: EndpointProfile, http_client: httpx.AsyncClient | httpx2.AsyncClient
 ) -> ModelPort:
     """把一个已经建好的 HTTP 客户端包成对应协议的适配器；不决定它的生命周期。"""
 
     api_key = profile.api_key.get_secret_value()
-    # profile.auth_field 是端点档案声明的鉴权头字段名；SDK 默认头名可能对不上自定义
-    # 中转站的约定，显式带上保证密钥确实进了档案指定的那个头。
-    auth_headers = {profile.auth_field: api_key}
+    selected_field = profile.auth_field.lower()
+    sdk_field = {
+        "authorization": "Authorization",
+        "x-api-key": "X-Api-Key",
+    }.get(selected_field, profile.auth_field)
+    headers = auth_headers(sdk_field, api_key)
+    marker = next(name for name in _AUTH_MARKERS if name.lower() != selected_field)
+    headers[marker] = selected_field
+    if _keep_selected_auth_header not in http_client.event_hooks["request"]:
+        http_client.event_hooks["request"].append(_keep_selected_auth_header)
     # ADR-0015：上游错误原样透传、只重试没回话的调用——SDK 自带的 max_retries 默认值
     # 会对已收到响应的错误（429/5xx）自动重试，与这条纪律冲突，此处关掉。
     # 「只重试没回话的调用」本身是可靠性票（#53-56）的范围，这里先不做。
@@ -108,7 +133,7 @@ def _build_port(
                 api_key=api_key,
                 base_url=_sdk_base_url(profile),
                 http_client=http_client,
-                default_headers=auth_headers,
+                default_headers=headers,
                 max_retries=0,
             )
         )
@@ -118,7 +143,7 @@ def _build_port(
         api_key=api_key,
         base_url=_sdk_base_url(profile),
         http_client=http_client,
-        default_headers=auth_headers,
+        default_headers=headers,
         max_retries=0,
     )
     if profile.protocol == "openai_responses":

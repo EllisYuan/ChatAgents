@@ -66,7 +66,7 @@ function installFetch() {
     if (url === "/api/runs" && method === "POST") {
       let controller;
       const body = new ReadableStream({ start(c) { controller = c; } });
-      const entry = { controller, signal: options.signal };
+      const entry = { controller, signal: options.signal, request: JSON.parse(options.body) };
       runStreams.push(entry);
       return Promise.resolve({ ok: true, body });
     }
@@ -193,16 +193,19 @@ test("首次 RUN_STARTED 用发送时的配置快照发起独立标题调用，�
 
   await send(container, "第一条消息");
   assert.equal(runStreams.length, 1, "发送应发起一次主运行");
+  assert.equal(runStreams[0].request.model_override.auth_field, "Authorization", "主运行使用发送时的鉴权 Header");
 
   // 主运行尚未 STARTED 时改界面配置——快照必须在发送时固定，不能在这里被读走。
   store.setMainModel("main-B");
   store.setCustomField("apiKey", "changed");
+  store.setCustomField("authField", "x-api-key");
 
   await pushFrame(runStreams[0], ENVELOPE_STARTED);
   assert.equal(titleRequests.length, 1, "RUN_STARTED 后应发起一次标题调用");
   assert.equal(titleRequests[0].url, `/api/sessions/${sessionId}/title`);
   assert.equal(titleRequests[0].body.model_override.main_model, "main-A", "快照固定在发送时");
   assert.equal(titleRequests[0].body.model_override.api_key, "secret", "快照固定在发送时");
+  assert.equal(titleRequests[0].body.model_override.auth_field, "Authorization", "鉴权 Header 也固定在发送时");
   assert.equal(titleRequests[0].body.model_override.main_model === "main-B", false);
 
   // 标题先于主运行完成：独立完成、不等待主回答。

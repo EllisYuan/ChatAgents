@@ -62,6 +62,7 @@ try {
   options.getState().setCustomField("baseUrl", "https://example.test/v1");
   options.getState().setMainModel("custom-main");
   options.getState().setAuxiliaryModel("custom-aux");
+  assert.equal(store.buildModelOverride(options.getState()).override.auth_field, "Authorization", "generation sends the selected Header name");
   options.getState().setProfileChoice("server-default");
   assert.equal(options.getState().mainModel, "", "leaving custom resets active preset model");
   options.getState().setProfileChoice(store.CUSTOM_PROFILE);
@@ -152,6 +153,14 @@ try {
     const again = store.restoreSessionModelConfig("legacy", true);
     assert.deepEqual(again, restored, "migration must be idempotent");
   }
+  const legacyAuthorization = {
+    ...legacyBase,
+    custom: { protocol: "openai_responses", baseUrl: "https://legacy.example/v1", authField: "Authorization", authScheme: "raw", apiKey: "legacy-secret" },
+  };
+  values.set(STORAGE_KEY, JSON.stringify({ latest: legacyAuthorization, sessions: { old: legacyAuthorization } }));
+  assert.equal(store.restoreSessionModelConfig("old", true).custom.authField, "Authorization", "existing Authorization remains selected");
+  assert.equal(store.restoreSessionModelConfig("new", false).custom.authField, "Authorization", "latest draft restores too");
+  assert.equal(Object.hasOwn(options.getState().custom, "authScheme"), false, "obsolete scheme is discarded on restore");
   values.clear();
 
   const catalog = { models: [{ id: "fixture", owned_by: "fixture", endpoint_profile: "custom" }], source: "discovered", error: null };

@@ -121,12 +121,17 @@ class Gateway:
     requests: list[tuple[str, str, str | None]] = field(default_factory=list)
     # 改写生成 URL 不能顺带改掉鉴权头或 body——这两样留在这里供断言。
     headers: list[dict[str, str]] = field(default_factory=list)
+    discovery_headers: list[dict[str, str]] = field(default_factory=list)
+    authorization_values: list[list[str]] = field(default_factory=list)
+    api_key_values: list[list[str]] = field(default_factory=list)
     payloads: list[dict[str, Any]] = field(default_factory=list)
 
 
 @contextmanager
 def endpoint_gateway(
     routes: Mapping[tuple[str, str], Protocol | None],
+    *,
+    required_authorization: str | None = None,
 ) -> Iterator[Gateway]:
     gateway = Gateway()
 
@@ -143,6 +148,9 @@ def endpoint_gateway(
 
         def do_GET(self) -> None:
             gateway.requests.append(("GET", self.path, None))
+            gateway.discovery_headers.append(
+                {key.lower(): value for key, value in self.headers.items()}
+            )
             if ("GET", self.path) not in routes:
                 self.respond(404)
                 return
@@ -156,7 +164,15 @@ def endpoint_gateway(
             model = payload["model"]
             gateway.requests.append(("POST", self.path, model))
             gateway.headers.append({key.lower(): value for key, value in self.headers.items()})
+            gateway.authorization_values.append(self.headers.get_all("Authorization", []))
+            gateway.api_key_values.append(self.headers.get_all("X-Api-Key", []))
             gateway.payloads.append(payload)
+            if (
+                required_authorization is not None
+                and self.headers.get("Authorization") != required_authorization
+            ):
+                self.respond(401, b'{"error":"Missing API key"}')
+                return
             protocol = routes.get(("POST", self.path))
             if protocol is None:
                 self.respond(404)

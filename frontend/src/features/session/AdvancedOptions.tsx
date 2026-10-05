@@ -83,7 +83,9 @@ export function AdvancedOptions({ disabled = false }: AdvancedOptionsProps) {
   }, [selectedProfile, prefillFromProfile]);
 
   // 空串 = 用户点了「自定义」还没填；两个预设之外的任何值也归自定义态。
-  const authFieldIsCustom = !AUTH_FIELD_PRESETS.some((preset) => preset === custom.authField);
+  const authFieldIsCustom = !AUTH_FIELD_PRESETS.some(
+    (preset) => preset.toLowerCase() === custom.authField.toLowerCase(),
+  );
 
   const isCustom = profileChoice === CUSTOM_PROFILE;
   const presetProfile = isCustom ? null : profileChoice;
@@ -235,15 +237,15 @@ export function AdvancedOptions({ disabled = false }: AdvancedOptionsProps) {
               鉴权字段做成选项卡而不是裸输入框：两个高频头名直接可选，选「自定义」
               才落回自由输入。后端仍按合法 header 名校验，选项卡不缩小可填集合。
             */}
-            <div className="auth-field-tabs" role="group" aria-label="鉴权模式">
+            <div className="auth-field-tabs" role="group" aria-label="鉴权Header">
               {AUTH_FIELD_PRESETS.map((preset) => (
                 <button
                   key={preset}
                   type="button"
-                  className={`auth-field-tab${custom.authField === preset ? " auth-field-tab--active" : ""}`}
+                  className={`auth-field-tab${custom.authField.toLowerCase() === preset.toLowerCase() ? " auth-field-tab--active" : ""}`}
                   onClick={() => setCustomField("authField", preset)}
                   disabled={disabled}
-                  aria-pressed={custom.authField === preset}
+                  aria-pressed={custom.authField.toLowerCase() === preset.toLowerCase()}
                 >
                   {preset}
                 </button>

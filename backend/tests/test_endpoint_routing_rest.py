@@ -99,6 +99,10 @@ def test_custom_endpoint_discovery_run_and_title_share_one_address(
                 assert not any(frame.get("name") == "chatagents.title" for frame in frames)
 
                 assert gateway.requests[0] == ("GET", prefix + "/models", None)
+                assert gateway.discovery_headers[0]["authorization"] == f"Bearer {API_KEY}"
+                assert all(
+                    headers["authorization"] == f"Bearer {API_KEY}" for headers in gateway.headers
+                )
                 # 主运行打主模型、独立标题调用打 auxiliary——共用同一个自定义端点。
                 assert sorted(gateway.requests[1:]) == sorted(
                     [

@@ -21,6 +21,7 @@ import httpx2
 
 from ..model_catalog import ModelCatalog, ModelCatalogStore, ModelItem
 from ..validation import validate_model_identifier, validate_non_blank
+from .auth import auth_headers
 from .endpoint_address import (
     DISCOVERY_UNAVAILABLE_REASON,
     AddressMode,
@@ -110,22 +111,9 @@ def _parse_models(payload: Any) -> tuple[ModelItem, ...]:
 
 
 def _discovery_headers(profile: EndpointProfile) -> dict[str, str]:
-    """清单请求的鉴权头。
+    """清单与生成共用鉴权值格式；Anthropic 清单另需版本头。"""
 
-    生成路径由官方 SDK 构造请求，这两件事 SDK 替我们做了；清单请求是自己发的
-    HTTP，得自己补上（2026-09-01 实测，两处缺失各让一个官方端点 4xx）：
-
-    - ``Authorization`` 要带 ``Bearer `` 前缀，否则 OpenAI 401；
-    - Anthropic 要求 ``anthropic-version``，缺了就 400。
-
-    档案自定义的鉴权头字段名照原样使用——``auth_field`` 是端点档案的属性
-    （ADR-0014），中转站可能约定别的头名，这里不替它做判断。
-    """
-
-    secret = profile.api_key.get_secret_value()
-    if profile.auth_field.lower() == "authorization" and not secret.lower().startswith("bearer "):
-        secret = f"Bearer {secret}"
-    headers = {profile.auth_field: secret}
+    headers = auth_headers(profile.auth_field, profile.api_key.get_secret_value())
     if profile.protocol == "anthropic_messages":
         headers["anthropic-version"] = ANTHROPIC_VERSION
     return headers
