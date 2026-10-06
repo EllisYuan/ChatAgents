@@ -36,7 +36,7 @@
 
 ## 跨度存指代，不存全文
 
-跨度里那条模型调用的 system 消息内容，整块替换成字面量 `{system_prompt@<version_id>}`；同一标识另填进 OpenInference 的 `llm.prompt_template.version`，`llm.prompt_template.variables` 照填 `date` 与 `step_budget`。工具集同理。**前端原样渲染这个占位符，不提供展开。**
+跨度里那条模型调用的 system 消息内容，整块替换成字面量 `{system_prompt@<version_id>}`；同一标识另填进 OpenInference 的 `llm.prompt_template.version`，`llm.prompt_template.variables` 只填 `step_budget`（ADR-0010 已修订，不再把日期注入系统提示词）。工具集同理。**前端原样渲染这个占位符，不提供展开。**
 
 方向上这是 `obs → app` 的引用，正是 [ADR-0002](./0002-business-and-observability-share-a-database.md) 唯一放行的那个方向。若提示词存在库外（仓库文件），跨度就只能引用一个库外标识，引用完整性无从保证——落库反而比文件更贴合已有架构。
 

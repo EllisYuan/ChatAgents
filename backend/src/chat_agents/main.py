@@ -16,8 +16,10 @@ from __future__ import annotations
 
 import asyncio
 import os
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import AsyncExitStack, asynccontextmanager
+from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Annotated, Any, Literal
 from uuid import UUID, uuid4, uuid5
 
@@ -31,7 +33,13 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sse_starlette.sse import EventSourceResponse
 
 from .agent.runner import AgentRunner
-from .agent.versioning import TITLE_PROMPT_TEMPLATE
+from .agent.step_budget import STEP_BUDGETS
+from .agent.versioning import (
+    SYSTEM_PROMPT_NAME,
+    TITLE_PROMPT_TEMPLATE,
+    model_input_version_lifespan,
+    render_system_prompt,
+)
 from .api_models import (
     HealthResponse,
     ModelItemView,
@@ -81,16 +89,37 @@ logger = structlog.get_logger(__name__)
 _TITLE_TIMEOUT_SECONDS = 30
 
 
+@dataclass(frozen=True, slots=True)
+class _ModelInputVersions:
+    system_content: str
+    prompt_version_id: str
+    tool_version_ids: Mapping[EffortTier, str]
+
+
 @asynccontextmanager
 async def _app_lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    """管理模型清单 24 小时刷新任务的生命周期。"""
+    """同步模型输入版本并管理模型清单刷新任务。"""
 
     settings = Settings()
     config = load_server_endpoints(settings.endpoints_config_path)
-    store = SqlAlchemyModelCatalogStore(get_session_factory())
+    factory = get_session_factory()
+    store = SqlAlchemyModelCatalogStore(factory)
     service = ModelDiscoveryService(store, server_config=config)
-    async with model_discovery_lifespan(service):
-        yield
+    async with model_input_version_lifespan(factory) as (prompts, tools):
+        system = next(row for row in prompts if row.name == SYSTEM_PROMPT_NAME)
+        tool_ids = {row.effort_tier: row.version_id for row in tools}
+        if set(tool_ids) != set(STEP_BUDGETS):
+            raise RuntimeError("工具集版本未覆盖全部努力档位")
+        _app.state.model_input_versions = _ModelInputVersions(
+            system_content=system.content,
+            prompt_version_id=system.version_id,
+            tool_version_ids=MappingProxyType(tool_ids),
+        )
+        try:
+            async with model_discovery_lifespan(service):
+                yield
+        finally:
+            del _app.state.model_input_versions
 
 
 app = FastAPI(title="ChatAgents", lifespan=_app_lifespan)
@@ -386,6 +415,12 @@ def get_title_model_port_factory() -> Callable[[EndpointProfile], ModelPort] | N
 async def create_run(
     request: RunRequest, runner: Annotated[AgentRunner, Depends(get_agent_runner)]
 ) -> EventSourceResponse:
+    versions: _ModelInputVersions | None = getattr(app.state, "model_input_versions", None)
+    if versions is None:
+        raise RuntimeError("模型输入版本尚未在应用启动时同步")
+    step_budget = STEP_BUDGETS[request.effort].soft
+    system_prompt = render_system_prompt(template=versions.system_content, step_budget=step_budget)
+    tool_schema_version_id = versions.tool_version_ids[request.effort]
     session_factory = get_session_factory()
     settings = Settings()
 
@@ -427,6 +462,9 @@ async def create_run(
                 http_client=http_client,
                 run_id=run_id,
                 shared_model_client=not custom_endpoint,
+                system_prompt=system_prompt,
+                prompt_version_id=versions.prompt_version_id,
+                tool_schema_version_id=tool_schema_version_id,
             )
             scope_service = object.__new__(ConversationService)
             async with scope_service.round_trip_payload_scope(
@@ -446,7 +484,7 @@ async def create_run(
                     protocol=resolved.profile.protocol,
                     key_source=resolved.key_source,
                     retention_window=projection.retention_window,
-                    run_attributes=projection.attributes,
+                    run_attributes={**projection.attributes, "step_budget": step_budget},
                     session_factory=session_factory,
                 )
                 async for frame in encode_sse(

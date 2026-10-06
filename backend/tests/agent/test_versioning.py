@@ -17,15 +17,16 @@ from chat_agents.llm.effort import EFFORT_TIERS
 def test_system_prompt_is_one_template_with_only_supported_variables() -> None:
     [version] = [item for item in build_prompt_versions() if item.name == SYSTEM_PROMPT_NAME]
 
-    assert version.variables == ["date", "step_budget"]
+    assert version.variables == ["step_budget"]
     assert "Thought:" not in version.content
     assert "Action:" not in version.content
     assert "Tavily" not in version.content
     assert "中国和亚洲" not in version.content
     assert "优先返回中文" not in version.content
     assert "跟随用户消息使用的语言" in version.content
-    assert render_system_prompt(date="2026年08月18日", step_budget=6).count("2026年08月18日") == 1
-    assert "6" in render_system_prompt(date="2026年08月18日", step_budget=6)
+    rendered = render_system_prompt(step_budget=6, template=version.content)
+    assert "今天的日期" not in rendered
+    assert "6" in rendered
 
 
 def test_title_prompt_is_stored_in_the_same_prompt_version_family() -> None:

@@ -31,8 +31,6 @@ TOOL_SCHEMA_NAME = "tools"
 SYSTEM_PROMPT_TEMPLATE = """你是一个友好、简洁、准确且有研究能力的对话式 AI 助手。
 你的回答应建立在可信的信息基础上；需要外部信息时使用可用工具，并在回答中提供来源。
 
-今天的日期：$date
-
 执行指南：
 - 使用 Markdown 清晰地组织回答。
 - 根据任务需要决定检索范围，遵守当前运行的步数预算：$step_budget。
@@ -109,16 +107,16 @@ def build_prompt_versions(*, created_at: datetime | None = None) -> list[PromptV
         _prompt_record(
             SYSTEM_PROMPT_NAME,
             SYSTEM_PROMPT_TEMPLATE,
-            ("date", "step_budget"),
+            ("step_budget",),
             created,
         ),
         _prompt_record(TITLE_PROMPT_NAME, TITLE_PROMPT_TEMPLATE, (), created),
     ]
 
 
-def render_system_prompt(*, date: str, step_budget: int) -> str:
-    """用本次运行的日期和软步数预算解析系统提示词。"""
-    return Template(SYSTEM_PROMPT_TEMPLATE).substitute(date=date, step_budget=step_budget)
+def render_system_prompt(*, step_budget: int, template: str = SYSTEM_PROMPT_TEMPLATE) -> str:
+    """用本次运行的软步数预算解析指定版本的系统提示词。"""
+    return Template(template).substitute(step_budget=step_budget)
 
 
 def prompt_reference(version_id_value: str) -> str:
@@ -136,7 +134,7 @@ def prompt_observation_attributes(version_id_value: str) -> dict[str, Any]:
     return {
         "input.value": prompt_reference(version_id_value),
         "llm.prompt_template.version": version_id_value,
-        "llm.prompt_template.variables": ["date", "step_budget"],
+        "llm.prompt_template.variables": ["step_budget"],
     }
 
 

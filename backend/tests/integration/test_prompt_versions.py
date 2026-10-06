@@ -4,8 +4,10 @@ import asyncio
 
 import pytest
 from chat_agents.agent.versioning import (
+    SYSTEM_PROMPT_NAME,
     build_prompt_versions,
     build_tool_schema_versions,
+    model_input_version_lifespan,
     sync_model_input_versions,
 )
 from chat_agents.db.app import PromptVersion, ToolSchemaVersion
@@ -48,5 +50,28 @@ def test_startup_sync_is_hash_stable_and_idempotent() -> None:
             assert {row.content_hash for row in stored_tools} == {
                 row.content_hash for row in build_tool_schema_versions()
             }
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.db
+def test_lifespan_exposes_committed_versions_without_duplicates() -> None:
+    async def scenario() -> None:
+        async with migrated_engine("chat_agents_prompt_lifespan") as engine:
+            factory = session_factory_for(engine)
+            for _ in range(2):
+                async with model_input_version_lifespan(factory) as (prompts, tools):
+                    system = next(row for row in prompts if row.name == SYSTEM_PROMPT_NAME)
+                    assert system.variables == ["step_budget"]
+                    assert {row.effort_tier for row in tools} == {"low", "medium", "high", "xhigh"}
+                    async with factory() as session:
+                        assert await session.get(PromptVersion, system.version_id) is not None
+                        for row in tools:
+                            assert await session.get(ToolSchemaVersion, row.version_id) is not None
+            async with factory() as session:
+                assert await session.scalar(select(func.count()).select_from(PromptVersion)) == 2
+                assert (
+                    await session.scalar(select(func.count()).select_from(ToolSchemaVersion)) == 4
+                )
 
     asyncio.run(scenario())
