@@ -34,7 +34,9 @@ const server = createServer((request, response) => {
         id: "test-session", title: "滚动回归", created_at: "2026-10-03T10:00:00Z", updated_at: "2026-10-03T10:00:00Z",
         messages: Array.from({ length: 20 }, (_, i) => ({
           id: `message-${i}`, seq: i, role: i % 2 ? "assistant" : "user",
-          content: [{ type: "text", text: `历史消息 ${i}。这里有足够长的内容，让聊天内容区需要滚动。`.repeat(3) }],
+          content: [{ type: "text", text: i === 1
+            ? '配置示例：`inline code`\n\n```json\n{"id": 1, "name": "测试"}\n```\n\n```js\nconst answer = 42;\n```'
+            : `历史消息 ${i}。这里有足够长的内容，让聊天内容区需要滚动。`.repeat(3) }],
         })),
       }));
     } else if (path === "/api/sessions") response.end("[]");
@@ -94,9 +96,35 @@ try {
   const assertBottom = async (stage) => assert.ok(await bottomGap() <= 2, `${stage}: message scroll bottom gap ${await bottomGap()}px`);
   await send("Page.navigate", { url: `http://127.0.0.1:${server.address().port}/s/test-session` });
   await waitFor("document.querySelectorAll('.chat-turn').length === 20");
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('.chat-code-block')].map(block => ({ language: block.querySelector('.chat-code-language').textContent, text: block.querySelector('code').textContent, button: block.querySelector('button').getAttribute('aria-label') }))"), [
+    { language: "json", text: '{"id": 1, "name": "测试"}\n', button: "复制代码" },
+    { language: "js", text: "const answer = 42;\n", button: "复制代码" },
+  ]);
+  assert.equal(await evaluate("document.querySelectorAll('.chat-markdown p code').length"), 1, "inline code must remain unchanged");
   await evaluate("document.querySelector('.message-scroll').scrollTop = 100000");
   await settle();
   await assertBottom("before send");
+  await evaluate("document.querySelector('.message-scroll').scrollTop = 0");
+  await settle();
+  await evaluate(`(() => { const clipboard = { value: null, async writeText(value) { this.value = value; } }; Object.defineProperty(navigator, 'clipboard', { configurable: true, value: clipboard }); document.querySelector('.chat-code-block .chat-code-copy').click(); })()`);
+  await waitFor("document.querySelector('.chat-code-block .chat-code-copy').textContent.includes('已复制')");
+  assert.equal(await evaluate("navigator.clipboard.value"), '{"id": 1, "name": "测试"}');
+  assert.equal(await evaluate("document.querySelectorAll('.chat-code-block .chat-code-copy')[1].textContent.trim()"), "复制", "copy feedback must belong to the selected block");
+  await evaluate("navigator.clipboard.writeText = async () => { throw new Error('Clipboard blocked'); }; document.querySelectorAll('.chat-code-block .chat-code-copy')[1].click()");
+  await waitFor("document.querySelectorAll('.chat-code-block .chat-code-copy')[1].textContent.includes('复制失败')");
+  await evaluate("navigator.clipboard.writeText = async function (value) { this.value = value; }; document.querySelectorAll('.chat-code-block .chat-code-copy')[1].focus()");
+  await send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
+  await send("Input.dispatchKeyEvent", { type: "char", key: "Enter", code: "Enter", text: "\r", windowsVirtualKeyCode: 13 });
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+  await waitFor("document.querySelectorAll('.chat-code-block .chat-code-copy')[1].textContent.includes('已复制')");
+  assert.equal(await evaluate("navigator.clipboard.value"), "const answer = 42;");
+  await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 800, deviceScaleFactor: 1, mobile: false });
+  await settle();
+  assert.equal(await evaluate("document.documentElement.scrollWidth > innerWidth"), false, "code toolbar must fit the mobile viewport");
+  await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+  await settle();
+  await evaluate("document.querySelector('.message-scroll').scrollTop = 100000");
+  await settle();
   await evaluate(`(() => { const input = document.querySelector('.composer-input'); const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set; setter.call(input, '新的提问'); input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   await settle();
   await evaluate("document.querySelector('.composer button[type=submit]').click()");

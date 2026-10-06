@@ -20,6 +20,7 @@ const profile = mkdtempSync(join(tmpdir(), "chatagents-layout-"));
 const screenshots = mkdtempSync(join(tmpdir(), "chatagents-layout-screenshots-"));
 const title = "这是一个需要截断但悬停应该显示完整内容的会话标题";
 let lastRun = null;
+let finishRun = null;
 const server = createServer((request, response) => {
   const path = new URL(request.url, "http://localhost").pathname;
   if (path === '/api/runs' && request.method === 'POST') {
@@ -28,7 +29,8 @@ const server = createServer((request, response) => {
     request.on('end', () => {
       lastRun = JSON.parse(body);
       response.setHeader('Content-Type', 'text/event-stream');
-      response.end('data: {"type":"RUN_STARTED","runId":"test-run"}\n\ndata: {"type":"RUN_FINISHED"}\n\n');
+      response.write('data: {"type":"RUN_STARTED","runId":"test-run"}\n\ndata: {"type":"STEP_STARTED"}\n\n');
+      finishRun = () => response.end('data: {"type":"RUN_FINISHED"}\n\n');
     });
     return;
   }
@@ -42,7 +44,7 @@ const server = createServer((request, response) => {
       response.end(JSON.stringify({ profiles: [{ name: 'test-profile', status: 'available', main_model: 'default-model', auxiliary_model: null }], default_profile: 'test-profile' }));
     } else if (path === "/api/models") {
       response.end(JSON.stringify({ models: [{ id: 'default-model', owned_by: 'test' }, { id: 'alternate-model', owned_by: 'test' }] }));
-    } else if (path.endsWith("/runs")) response.end("[]");
+    } else if (path.endsWith("/runs")) response.end(JSON.stringify([{ id: "history-run", last_message_seq: 1 }]));
     else { response.statusCode = 404; response.end("{}"); }
     return;
   }
@@ -98,6 +100,21 @@ try {
     if (await evaluate("document.querySelectorAll('.column-resizer').length === 1 && document.querySelectorAll('.chat-turn').length === 8 && !!document.querySelector('.session-item-title')")) break;
     await delay(100);
   }
+  for (let i = 0; i < 100; i++) {
+    if (await evaluate("!!document.querySelector('.run-summary-trigger')")) break;
+    await delay(100);
+  }
+  assert.deepEqual(await evaluate(`(() => {
+    const trigger = document.querySelector('.run-summary-trigger');
+    const marker = () => trigger.querySelector('.run-summary-marker').textContent;
+    const states = [[trigger.getAttribute('aria-expanded'), marker()]];
+    trigger.click();
+    return new Promise(resolve => requestAnimationFrame(() => {
+      states.push([trigger.getAttribute('aria-expanded'), marker()]);
+      trigger.click();
+      requestAnimationFrame(() => resolve([...states, [trigger.getAttribute('aria-expanded'), marker()]]));
+    }));
+  })()`), [['false', '▸'], ['true', '▾'], ['false', '▸']], 'run detail marker should follow expanded state');
   assert.equal(await evaluate("document.querySelector('.session-item-title').title"), `${title} 0`);
   assert.deepEqual(await evaluate("[...document.querySelector('.session-item-actions').querySelectorAll('button')].map(button => ({ label: button.getAttribute('aria-label'), title: button.title, icon: !!button.querySelector('svg'), text: button.textContent.trim() }))"), [
     { label: "重命名会话", title: "改名", icon: true, text: "" },
@@ -287,6 +304,23 @@ try {
   await evaluate("document.querySelector('.config-confirmation .settings-done').click()");
   for (let i = 0; i < 100 && !lastRun; i++) await delay(50);
   assert.equal(lastRun?.model_override?.main_model, 'alternate-model', JSON.stringify({ lastRun, confirmation: await evaluate("document.querySelector('.config-confirmation')?.textContent"), messages: await evaluate("document.querySelector('.message-scroll')?.textContent.slice(-180)"), selected: await evaluate("document.querySelector('.quick-model-trigger')?.textContent") }));
+  for (let i = 0; i < 100; i++) {
+    if (await evaluate("!![...document.querySelectorAll('.run-summary-trigger')].find(button => button.textContent.includes('运行中'))")) break;
+    await delay(100);
+  }
+  assert.deepEqual(await evaluate(`(() => {
+    const trigger = [...document.querySelectorAll('.run-summary-trigger')].find(button => button.textContent.includes('运行中'));
+    if (!trigger) return null;
+    const marker = () => trigger.querySelector('.run-summary-marker').textContent;
+    const states = [[trigger.getAttribute('aria-expanded'), marker()]];
+    trigger.click();
+    return new Promise(resolve => requestAnimationFrame(() => {
+      states.push([trigger.getAttribute('aria-expanded'), marker()]);
+      trigger.click();
+      requestAnimationFrame(() => resolve([...states, [trigger.getAttribute('aria-expanded'), marker()]]));
+    }));
+  })()`), [['false', '▸'], ['true', '▾'], ['false', '▸']], 'running detail marker should follow expanded state');
+  finishRun();
   assert.equal(await evaluate("!!document.querySelector('.composer-toolbar')"), true, JSON.stringify({ pageException, page: await evaluate("({url: location.href, body: document.body?.textContent.slice(-500)})") }));
   assert.equal(await evaluate("document.querySelector('.composer-toolbar').textContent.includes('高级选项')"), false);
   const composerBeforeSettings = await evaluate("document.querySelector('.composer').getBoundingClientRect().top");

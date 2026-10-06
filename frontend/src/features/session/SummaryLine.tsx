@@ -13,6 +13,7 @@ function formatDuration(durationMs: number): string {
 
 interface SummaryLineProps {
   pending: boolean;
+  expanded: boolean;
   summary?: RunSummary;
 }
 
@@ -22,11 +23,12 @@ interface SummaryLineProps {
  * 流式期间用量是半截的，让它随流跳动等于把不准的数做成最抢眼的动效，所以
  * 流式期间只画骨架，`RUN_FINISHED`/`RUN_ERROR`/断连之后才落定成具体数字。
  */
-export function SummaryLine({ pending, summary }: SummaryLineProps) {
+export function SummaryLine({ pending, expanded, summary }: SummaryLineProps) {
+  const marker = expanded ? "▾" : "▸";
   if (pending) {
     return (
       <p className="run-summary run-summary--pending" aria-live="polite">
-        <span className="run-summary-marker run-summary-marker--pending">▸</span> 运行中
+        <span className="run-summary-marker run-summary-marker--pending" aria-hidden="true">{marker}</span> 运行中
       </p>
     );
   }
@@ -39,7 +41,7 @@ export function SummaryLine({ pending, summary }: SummaryLineProps) {
       : "用量不完整";
   return (
     <p className="run-summary" aria-live="polite">
-      <span className="run-summary-marker">▸</span> {summary.steps} 步 · {tokensText} ·{" "}
+      <span className="run-summary-marker" aria-hidden="true">{marker}</span> {summary.steps} 步 · {tokensText} ·{" "}
       {formatDuration(summary.durationMs)}
     </p>
   );

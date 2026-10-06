@@ -62,15 +62,15 @@ export function TracePanel({ pending, summary, liveTree, runId }: TracePanelProp
       {canExpand ? (
         <button className="run-summary-trigger" type="button" onClick={handleToggle} aria-expanded={expanded}>
           {summary || pending ? (
-            <SummaryLine pending={pending} summary={summary} />
+            <SummaryLine pending={pending} expanded={expanded} summary={summary} />
           ) : (
             <p className="run-summary">
-              <span className="run-summary-marker">▸</span> 查看运行详情
+              <span className="run-summary-marker" aria-hidden="true">{expanded ? "▾" : "▸"}</span> 查看运行详情
             </p>
           )}
         </button>
       ) : (
-        <SummaryLine pending={pending} summary={summary} />
+        <SummaryLine pending={pending} expanded={expanded} summary={summary} />
       )}
       <ReasoningLine reasoning={lastReasoning} />
       {expanded && (

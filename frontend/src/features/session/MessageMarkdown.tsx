@@ -1,4 +1,40 @@
-import { memo } from "react";
+import { isValidElement, memo, type ReactNode, useEffect, useRef, useState } from "react";
+import { CheckIcon, CopyIcon } from "./icons";
+
+function CodeBlock({ children }: { children?: ReactNode }) {
+  const code = isValidElement<{ children?: ReactNode; className?: string }>(children) ? children : null;
+  const text = typeof code?.props.children === "string" ? code.props.children.replace(/\n$/, "") : "";
+  const language = code?.props.className?.match(/(?:^|\s)language-([\w+-]+)/)?.[1];
+  const [status, setStatus] = useState<"idle" | "copied" | "failed">("idle");
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setStatus("copied");
+    } catch {
+      setStatus("failed");
+    }
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setStatus("idle"), 1800);
+  };
+
+  return (
+    <div className="chat-code-block">
+      <div className="chat-code-toolbar">
+        <span className="chat-code-language">{language ?? "代码"}</span>
+        <button type="button" className="chat-code-copy" onClick={() => void copy()} disabled={!text} aria-label={status === "failed" ? "复制失败，请重试" : status === "copied" ? "已复制代码" : "复制代码"}>
+          {status === "copied" ? <CheckIcon size={14} /> : <CopyIcon size={14} />}
+          <span aria-live="polite">{status === "copied" ? "已复制" : status === "failed" ? "复制失败" : "复制"}</span>
+        </button>
+      </div>
+      <pre>{children}</pre>
+    </div>
+  );
+}
+
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -13,6 +49,7 @@ const components: Components = {
       {children}
     </a>
   ),
+  pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
 };
 
 interface MessageMarkdownProps {
