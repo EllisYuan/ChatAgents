@@ -13,6 +13,7 @@ from sqlalchemy import select
 
 from .db_helpers import migrated_engine, session_factory_for
 from .endpoint_gateway import ANSWER, API_KEY, AUXILIARY_MODEL, MODEL, endpoint_gateway
+from .test_main import _started_app
 
 
 @pytest.mark.db
@@ -32,6 +33,8 @@ def test_custom_endpoint_discovery_run_and_title_share_one_address(
     full_url: bool | None,
     prefix: str,
 ) -> None:
+    monkeypatch.setenv("CHATAGENTS_MODEL_DISCOVERY_ENABLED", "false")
+
     async def scenario() -> None:
         async with migrated_engine("chat_agents_endpoint_routing") as engine:
             factory = session_factory_for(engine)
@@ -52,7 +55,10 @@ def test_custom_endpoint_discovery_run_and_title_share_one_address(
                     endpoint["full_url"] = full_url
                 session_id = uuid4()
                 transport = httpx.ASGITransport(app=main_module.app)
-                async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                async with (
+                    _started_app(),
+                    httpx.AsyncClient(transport=transport, base_url="http://test") as client,
+                ):
                     refresh = await client.post("/api/models/refresh", json=endpoint)
                     assert refresh.status_code == 200
                     assert refresh.json()["source"] == "discovered"
@@ -149,6 +155,7 @@ def test_custom_endpoint_discovery_run_and_title_share_one_address(
 @pytest.mark.db
 def test_a_wrong_custom_address_still_fails_loudly(monkeypatch: pytest.MonkeyPatch) -> None:
     """自动补全不是「怎么填都能跑」：地址真错时仍按 ADR-0015 原样透传上游 404。"""
+    monkeypatch.setenv("CHATAGENTS_MODEL_DISCOVERY_ENABLED", "false")
 
     async def scenario() -> None:
         async with migrated_engine("chat_agents_endpoint_routing_error") as engine:
@@ -164,7 +171,10 @@ def test_a_wrong_custom_address_still_fails_loudly(monkeypatch: pytest.MonkeyPat
                     "api_key": API_KEY,
                 }
                 transport = httpx.ASGITransport(app=main_module.app)
-                async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                async with (
+                    _started_app(),
+                    httpx.AsyncClient(transport=transport, base_url="http://test") as client,
+                ):
                     refresh = await client.post("/api/models/refresh", json=endpoint)
                     assert refresh.json()["source"] == "fallback"
                     response = await client.post(
@@ -195,6 +205,7 @@ def test_a_wrong_custom_address_still_fails_loudly(monkeypatch: pytest.MonkeyPat
 @pytest.mark.db
 def test_an_opaque_full_url_runs_but_reports_no_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
     """完整 URL 指向非标准路径：生成照常，清单如实说推不出来且不试探。"""
+    monkeypatch.setenv("CHATAGENTS_MODEL_DISCOVERY_ENABLED", "false")
 
     async def scenario() -> None:
         async with migrated_engine("chat_agents_endpoint_routing_opaque") as engine:
@@ -211,7 +222,10 @@ def test_an_opaque_full_url_runs_but_reports_no_catalog(monkeypatch: pytest.Monk
                     "full_url": True,
                 }
                 transport = httpx.ASGITransport(app=main_module.app)
-                async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                async with (
+                    _started_app(),
+                    httpx.AsyncClient(transport=transport, base_url="http://test") as client,
+                ):
                     refresh = await client.post("/api/models/refresh", json=endpoint)
                     body = refresh.json()
                     assert body["source"] == "fallback"

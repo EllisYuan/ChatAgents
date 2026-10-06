@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -19,22 +20,32 @@ import httpx
 import pytest
 from chat_agents import main as main_module
 from chat_agents.agent.runner import AgentRunner
+from chat_agents.agent.step_budget import STEP_BUDGETS
 from chat_agents.agent.tool_executor import ToolExecutor
+from chat_agents.agent.versioning import render_system_prompt
 from chat_agents.conversation.repository import ConversationRepository
 from chat_agents.conversation.service import ConversationService
 from chat_agents.db.app import Message as MessageRow
+from chat_agents.db.app import PromptVersion, ToolSchemaVersion
 from chat_agents.db.app import Session as SessionRow
 from chat_agents.db.obs import Run, Span
 from chat_agents.llm.effort import EffortTier
 from chat_agents.llm.events import ModelCallCompleted, ModelEvent, Usage
 from chat_agents.llm.events import TextDelta as ModelTextDelta
-from chat_agents.llm.message import ModelMessage, TextBlock
+from chat_agents.llm.message import ModelMessage, TextBlock, ToolCallBlock
 from chat_agents.observability.repository import ObservabilityRepository
+from chat_agents.tools.types import ToolResult, ToolSpec
 from sqlalchemy import select
 
 from .db_helpers import migrated_engine, session_factory_for
 
 _SEED_TEXT = "首条用户消息"
+
+
+@asynccontextmanager
+async def _started_app() -> AsyncIterator[None]:
+    async with main_module.app.router.lifespan_context(main_module.app):
+        yield
 
 
 class _ScriptedPort:
@@ -89,9 +100,9 @@ class _ScriptedPort:
             yield event
 
 
-def _completed(text: str) -> ModelCallCompleted:
+def _completed(text: str, *, tool_calls: tuple[ToolCallBlock, ...] = ()) -> ModelCallCompleted:
     return ModelCallCompleted(
-        message=ModelMessage(role="assistant", content=(TextBlock(text=text),)),
+        message=ModelMessage(role="assistant", content=(TextBlock(text=text), *tool_calls)),
         usage=Usage(state="complete", input_tokens=1, output_tokens=1, reasoning_tokens=None),
         stop_reason="stop",
     )
@@ -109,23 +120,29 @@ async def _parse_sse(response: httpx.Response) -> list[dict[str, Any]]:
     return frames
 
 
-def _override_runner(port: _ScriptedPort) -> None:
-    runner = AgentRunner(tool_executor=ToolExecutor({}), model_port_factory=lambda _p: port)
+def _override_runner(port: _ScriptedPort, *, executor: ToolExecutor | None = None) -> None:
+    runner = AgentRunner(
+        tool_executor=executor if executor is not None else ToolExecutor({}),
+        model_port_factory=lambda _p: port,
+    )
     main_module.app.dependency_overrides[main_module.get_agent_runner] = lambda: runner
 
 
-async def _run(port: _ScriptedPort, body: dict[str, Any]) -> list[dict[str, Any]]:
+async def _run(
+    port: _ScriptedPort, body: dict[str, Any], *, executor: ToolExecutor | None = None
+) -> list[dict[str, Any]]:
     """打一次 ``POST /api/runs`` 并收完整个 SSE 流；调用方负责建好数据库。"""
 
-    _override_runner(port)
+    _override_runner(port, executor=executor)
     try:
-        transport = httpx.ASGITransport(app=main_module.app)
-        async with (
-            httpx.AsyncClient(transport=transport, base_url="http://test") as client,
-            client.stream("POST", "/api/runs", json=body) as response,
-        ):
-            assert response.status_code == 200
-            return await _parse_sse(response)
+        async with _started_app():
+            transport = httpx.ASGITransport(app=main_module.app)
+            async with (
+                httpx.AsyncClient(transport=transport, base_url="http://test") as client,
+                client.stream("POST", "/api/runs", json=body) as response,
+            ):
+                assert response.status_code == 200
+                return await _parse_sse(response)
     finally:
         main_module.app.dependency_overrides.pop(main_module.get_agent_runner, None)
 
@@ -172,6 +189,7 @@ def test_post_api_runs_streams_sse_and_persists_incrementally(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("CHATAGENTS_MODEL_DISCOVERY_ENABLED", "false")
 
     async def scenario() -> None:
         async with migrated_engine("chat_agents_main_e2e") as engine:
@@ -189,6 +207,11 @@ def test_post_api_runs_streams_sse_and_persists_incrementally(
             assert "TEXT_MESSAGE_CONTENT" in types
             # 主运行只调用了一次主模型——它不再发起标题调用（issue #93）。
             assert port.calls == 1
+            assert port.system_prompts == [
+                render_system_prompt(step_budget=STEP_BUDGETS["medium"].soft)
+            ]
+            assert port.system_prompts[0] is not None
+            assert "今天的日期" not in port.system_prompts[0]
 
             async with factory() as session:
                 repository = ConversationRepository(session)
@@ -199,6 +222,98 @@ def test_post_api_runs_streams_sse_and_persists_incrementally(
                     await session.execute(select(Run).where(Run.session_id == session_id))
                 ).scalar_one()
                 assert run.status == "completed"
+                assert run.attributes["step_budget"] == STEP_BUDGETS["medium"].soft
+                prompt = await session.get(PromptVersion, run.prompt_version_id)
+                tools = await session.get(ToolSchemaVersion, run.tool_schema_version_id)
+                assert prompt is not None and prompt.name == "system"
+                assert prompt.variables == ["step_budget"]
+                assert tools is not None and tools.effort_tier == "medium"
+                assert port.system_prompts[0] == render_system_prompt(
+                    step_budget=run.attributes["step_budget"], template=prompt.content
+                )
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.db
+@pytest.mark.parametrize("effort", ["low", "high", "xhigh"])
+def test_main_prompt_tracks_effort_and_survives_multiple_iterations(
+    monkeypatch: pytest.MonkeyPatch, effort: EffortTier
+) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("CHATAGENTS_MODEL_DISCOVERY_ENABLED", "false")
+
+    async def scenario() -> None:
+        async with migrated_engine("chat_agents_main_prompt_effort") as engine:
+            factory = session_factory_for(engine)
+            monkeypatch.setattr(main_module, "get_session_factory", lambda: factory)
+            port = _ScriptedPort(
+                [
+                    [
+                        _completed(
+                            "搜索",
+                            tool_calls=(ToolCallBlock(id="search-1", name="search", arguments={}),),
+                        )
+                    ],
+                    [_completed("完成")],
+                ]
+            )
+
+            async def search(_args: dict[str, Any], _ctx: Any) -> ToolResult:
+                return ToolResult(structured={"ok": True}, model_text="结果")
+
+            executor = ToolExecutor(
+                {
+                    "search": ToolSpec(
+                        name="search",
+                        description="搜索",
+                        parameters={"type": "object", "properties": {}},
+                        handler=search,
+                        timeout_s=5.0,
+                        retryable=False,
+                        parallelizable=True,
+                    )
+                }
+            )
+            session_id = uuid4()
+            frames = await _run(
+                port,
+                {"session_id": str(session_id), "message": "测试", "effort": effort},
+                executor=executor,
+            )
+            assert "RUN_FINISHED" in [frame["type"] for frame in frames]
+            assert (
+                port.system_prompts
+                == [render_system_prompt(step_budget=STEP_BUDGETS[effort].soft)] * 2
+            )
+            assert all(message.role != "system" for call in port.messages for message in call)
+            async with factory() as session:
+                run = (await session.execute(select(Run))).scalar_one()
+                assert run.attributes["step_budget"] == STEP_BUDGETS[effort].soft
+                tools = await session.get(ToolSchemaVersion, run.tool_schema_version_id)
+                assert tools is not None and tools.effort_tier == effort
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.db
+def test_failed_run_keeps_its_prompt_and_tool_versions(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("CHATAGENTS_MODEL_DISCOVERY_ENABLED", "false")
+
+    async def scenario() -> None:
+        async with migrated_engine("chat_agents_main_failed_version") as engine:
+            factory = session_factory_for(engine)
+            monkeypatch.setattr(main_module, "get_session_factory", lambda: factory)
+            port = _ScriptedPort([[]])
+            frames = await _run(port, {"session_id": str(uuid4()), "message": "测试"})
+            assert "RUN_ERROR" in [frame["type"] for frame in frames]
+            assert port.system_prompts == [render_system_prompt(step_budget=6)]
+            async with factory() as session:
+                run = (await session.execute(select(Run))).scalar_one()
+                assert run.status == "failed"
+                assert await session.get(PromptVersion, run.prompt_version_id) is not None
+                assert await session.get(ToolSchemaVersion, run.tool_schema_version_id) is not None
 
     asyncio.run(scenario())
 
@@ -896,6 +1011,60 @@ def test_a_late_title_never_changes_the_finished_runs_statistics(
                 ).scalar_one()
                 assert span.run_id is None
                 assert span.session_id == session_id
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.db
+def test_main_run_requires_committed_versions_before_persisting_user_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+
+    async def scenario() -> None:
+        async with migrated_engine("chat_agents_main_without_lifespan") as engine:
+            factory = session_factory_for(engine)
+            monkeypatch.setattr(main_module, "get_session_factory", lambda: factory)
+            port = _ScriptedPort([[_completed("不该调用")]])
+            _override_runner(port)
+            try:
+                transport = httpx.ASGITransport(app=main_module.app, raise_app_exceptions=False)
+                async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                    response = await client.post(
+                        "/api/runs", json={"session_id": str(uuid4()), "message": "测试"}
+                    )
+                assert response.status_code == 500
+                assert port.calls == 0
+                async with factory() as session:
+                    assert (await session.execute(select(SessionRow))).scalars().all() == []
+                    assert (await session.execute(select(MessageRow))).scalars().all() == []
+            finally:
+                main_module.app.dependency_overrides.pop(main_module.get_agent_runner, None)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.db
+def test_version_sync_failure_prevents_app_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CHATAGENTS_MODEL_DISCOVERY_ENABLED", "false")
+
+    async def scenario() -> None:
+        async with migrated_engine("chat_agents_version_startup_failure") as engine:
+            factory = session_factory_for(engine)
+            monkeypatch.setattr(main_module, "get_session_factory", lambda: factory)
+
+            @asynccontextmanager
+            async def failing_versions(_factory: Any) -> AsyncIterator[Any]:
+                raise RuntimeError("版本同步失败")
+                yield
+
+            monkeypatch.setattr(main_module, "model_input_version_lifespan", failing_versions)
+            with pytest.raises(RuntimeError, match="版本同步失败"):
+                async with _started_app():
+                    pass
+            assert not hasattr(main_module.app.state, "model_input_versions")
+            async with factory() as session:
+                assert (await session.execute(select(PromptVersion))).scalars().all() == []
 
     asyncio.run(scenario())
 

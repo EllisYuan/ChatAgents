@@ -45,6 +45,6 @@ def test_observation_keeps_only_prompt_reference_and_version_metadata() -> None:
     assert attributes == {
         "input.value": "{system_prompt@system@v1}",
         "llm.prompt_template.version": "system@v1",
-        "llm.prompt_template.variables": ["date", "step_budget"],
+        "llm.prompt_template.variables": ["step_budget"],
     }
     assert "内部提示词" not in attributes["input.value"]

@@ -2,16 +2,27 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from copy import deepcopy
 
 import pytest
 import schemathesis
+from chat_agents import main as main_module
+from chat_agents.agent.versioning import build_prompt_versions, build_tool_schema_versions
 from chat_agents.main import app
 from hypothesis import seed, settings
 
 
 @pytest.fixture
-def api_schema() -> object:
+def api_schema(monkeypatch: pytest.MonkeyPatch) -> object:
+    monkeypatch.setenv("CHATAGENTS_MODEL_DISCOVERY_ENABLED", "false")
+
+    @asynccontextmanager
+    async def fixed_versions(_factory: object) -> AsyncIterator[tuple[list[object], list[object]]]:
+        yield build_prompt_versions(), build_tool_schema_versions()
+
+    monkeypatch.setattr(main_module, "model_input_version_lifespan", fixed_versions)
     document = deepcopy(app.openapi())
     document["paths"] = {"/health": document["paths"]["/health"]}
     schema = schemathesis.openapi.from_dict(document)
