@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 
 import { TracePanel } from "../trace/TracePanel";
@@ -46,6 +46,25 @@ export function SessionPage() {
   const [draftBeforeHistory, setDraftBeforeHistory] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
+  const messageScrollRef = useRef<HTMLDivElement>(null);
+  const followBottomRef = useRef(true);
+  const previousStreamingIdRef = useRef<string | null>(null);
+
+  useLayoutEffect(() => {
+    followBottomRef.current = true;
+  }, [sessionId]);
+
+  useLayoutEffect(() => {
+    if (streamingId && streamingId !== previousStreamingIdRef.current) followBottomRef.current = true;
+    previousStreamingIdRef.current = streamingId;
+    const scroll = messageScrollRef.current;
+    if (scroll && followBottomRef.current) scroll.scrollTop = scroll.scrollHeight;
+  });
+
+  const handleMessageScroll = () => {
+    const scroll = messageScrollRef.current;
+    if (scroll) followBottomRef.current = scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop <= 48;
+  };
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -95,7 +114,7 @@ export function SessionPage() {
     <section className="session-page" aria-label="会话">
       <div className="session-grid">
         <article className="conversation-card" aria-label="对话">
-          <div className="message-scroll" tabIndex={0} role="region" aria-label="聊天内容">
+          <div className="message-scroll" ref={messageScrollRef} onScroll={handleMessageScroll} tabIndex={0} role="region" aria-label="聊天内容">
           {isEmpty ? (
             <div className="empty-conversation">
               <div>

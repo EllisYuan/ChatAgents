@@ -9,7 +9,7 @@
     "lint": "eslint .",
     "typecheck": "npm run generate:types && tsc --noEmit",
     "check:model-options": "node scripts/check-model-options-regression.mjs",
-    "check:layout": "npm run build && node scripts/check-layout-regression.mjs",
+    "check:layout": "npm run build && node scripts/check-layout-regression.mjs && node scripts/check-message-scroll-regression.mjs",
     "test:title-generation": "node --import ./node_modules/tsx/dist/loader.mjs --test scripts/check-title-generation-interactions.mjs scripts/check-title-proxy-disconnect.mjs",
     "generate:types": "node scripts/generate-api-types.mjs"
   },
